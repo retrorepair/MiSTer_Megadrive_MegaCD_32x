@@ -818,10 +818,38 @@ wire        CART_ROM_RD, CART_ROM_WRL, CART_ROM_WRH;
 wire [14:0] CART_SRAM_A;
 wire  [7:0] CART_SRAM_DO;
 wire        CART_SRAM_RD, CART_SRAM_WR;
-wire [15:0] CART_MEM_DO;
-wire        CART_MEM_BUSY;
+wire [15:0] CART_MEM_DO;         // clk_sys-registered SDRAM port 0 read data
+wire        CART_MEM_BUSY;       // clk_sys-registered SDRAM port 0 busy
 wire        CART_SRAM_ACC = CART_SRAM_RD | CART_SRAM_WR;
 wire        CART_EXT = CART_ROM_RD | CART_ROM_WRL | CART_ROM_WRH | CART_SRAM_ACC;
+
+// SDRAM port 0 is on clk_ram: register the request (from cart.sv's combinational decode of the 32X's
+// pass-through strobes) and the result (data, busy) in clk_sys so no path crosses the domains through
+// the cart/32X muxes. The 32X waits for busy to rise then fall, so the extra clock each way is invisible.
+reg  [24:1] cm_addr;
+reg  [15:0] cm_din;
+reg         cm_rd, cm_wrl, cm_wrh;
+wire [15:0] cm_dout;
+wire        cm_busy;
+reg  [15:0] cm_dout_r;
+reg         cm_busy_r, cm_pend;
+always @(posedge clk_sys) begin
+	reg old_req;
+	cm_addr   <= CART_SRAM_ACC ? {9'b011100000, CART_SRAM_A[14:0]} : {1'b0, CART_ROM_A[23:1]};
+	cm_din    <= CART_SRAM_ACC ? {8'h00, CART_SRAM_DO} : CART_ROM_DO;
+	cm_rd     <= CART_ROM_RD | CART_SRAM_RD;
+	cm_wrl    <= CART_ROM_WRL | CART_SRAM_WR;
+	cm_wrh    <= CART_ROM_WRH;
+	cm_busy_r <= cm_busy;
+	if (cm_busy_r & ~cm_busy) cm_dout_r <= cm_dout;   // the controller's data is final when busy drops
+	// a new request (rising strobe) counts as busy until the controller's busy is seen, so the 32X never
+	// samples the gap between issuing the request and the controller accepting it
+	old_req <= cm_rd | cm_wrl | cm_wrh;
+	if ((cm_rd | cm_wrl | cm_wrh) & ~old_req) cm_pend <= 1;
+	else if (cm_busy_r) cm_pend <= 0;
+end
+assign CART_MEM_DO   = cm_dout_r;
+assign CART_MEM_BUSY = cm_busy_r | cm_pend;
 
 CART cart
 (
@@ -931,13 +959,13 @@ sdram sdram
 	.clk(clk_ram),
 
 	// cartridge (MD or SH-2 through the 32X): ROM 0000000-0DFFFFF, SRAM 0E00000-0EFFFFF (one byte per word, low lane)
-	.addr0(CART_SRAM_ACC ? {9'b011100000, CART_SRAM_A[14:0]} : {1'b0, CART_ROM_A[23:1]}),
-	.din0(CART_SRAM_ACC ? {8'h00, CART_SRAM_DO} : CART_ROM_DO),
-	.dout0(CART_MEM_DO),
-	.rd0(CART_ROM_RD | CART_SRAM_RD),
-	.wrl0(CART_ROM_WRL | CART_SRAM_WR),
-	.wrh0(CART_ROM_WRH),
-	.busy0(CART_MEM_BUSY),
+	.addr0(cm_addr),
+	.din0(cm_din),
+	.dout0(cm_dout),
+	.rd0(cm_rd),
+	.wrl0(cm_wrl),
+	.wrh0(cm_wrh),
+	.busy0(cm_busy),
 
 	// Mega CD BIOS ROM (main CPU / VDP DMA) F00000-F1FFFF
 	.addr1({8'b01111000, GEN_VA[16:1]}),
