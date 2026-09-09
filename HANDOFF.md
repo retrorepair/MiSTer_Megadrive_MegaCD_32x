@@ -427,3 +427,34 @@ IRQ 0A root-cause analysis.*
 7. **Q5 (fpgagen refresh stall):** untested; Phase 1 item.
 8. **NukedMD-MegaCD MCD fixes are small, portable patches** (whitespace-ignored): `ASIC.vhd` 209 lines, `CDC.vhd` 153, `PCM.vhd` 52, `MCD.vhd` 92 (adds `pcm_mem.sv` PCM-RAM-in-SDRAM ports, `EN50` 50 MHz enable, and Nuked-sub-CPU-specific `MCLK`/`S68K_CLK` which are dropped if the sub-CPU stays fx68k). `MC68K.vhd` (226) is the Nuked wrapper — not ported unless the Nuked sub-CPU is chosen. Every fix is commented with the mcd-verificator test it satisfies.
 9. **SDRAM controller** (`sdram.sv`, both cores): 3 ports, single word per request, ~7 clocks each at 107.39 MHz.
+
+## Phase 0 measurements (fitted, Quartus 17.0.2, seed 1, both cores unmodified)
+
+Device: 41,910 ALMs / 553 M10K. Full tables: `phase0/entity_S32X.tsv`, `phase0/entity_MegaCD_ORIG.tsv` (from `tools/parse_entity.py`).
+
+| Block | ALMs | M10K | DSP | Source |
+|---|---|---|---|---|
+| **S32X core total** | **25,094 (60 %)** | **488** | 51 | fails 53.69 MHz setup by −2.80 ns (TNS −42) — all 17 failing paths are the 107 MHz `sdram.dout1` → `S32X_IF.CDI_SYNC` (negedge clk_sys) crossing, none inside the SH-2s |
+| 32X block (`S32X`, without frame buffers) | 9,199 | 14 | 12 | IF 691 (5 M10K: SH boot ROM 4, MD boot ROM 1), VDP 237 (1 = palette), 2 × SH7604 |
+| **SH7604 (one SH-2)** | **4,109** | **4** | 6 | core 1,680 (regfile 96), cache 690 (4 M10K data; tags/LRU in MLAB), DMAC 379, MULT 291 (6 DSP), DIVU 285, BSC 178, INTC 155, SCI 100, UBC 89, FRT 87, WDT 27, MSBY 5, glue 140 |
+| 32X frame buffers (2 × 128 KB spram) | ~0 | **~256** | 0 | must go external |
+| gen (S32X revision, newer) | 6,801 | 153 | 11 | 68K work RAM 64, VRAM 52 (one 64K×8), Z80 RAM 8, VDP 7, fx68k 6, jt12 4; fx68k 1,958, VDP 1,251, T80 1,046, jt12 954, genmix 502, multitap 358, BA 231 |
+| **MegaCD_ORIG core total** | **25,268 (60 %)** | **535 (97 %)** | 49 | timing: see build log |
+| MCD block | 6,069 | 349 | 5 | Word RAM 2×128 = 256, PCM RAM 64, CDC RAM 16, CDDA FIFO 7, fx68k 6; ASIC 1,604, sub-fx68k 2,006, PCM 510, CDC 171, **Game Genie 1,408 (strip)** |
+| gen (MegaCD revision, older) | 8,489 | 103 | 11 | includes Game Genie 1,490; VRAM 64 (4 × 16K×8), Z80 8, vdp 14, jt12 11, fx68k 6 |
+| Framework (`sys_top` − `emu`, MegaCD's newer sys) | 7,098 | 59 | 33 | ascal 2,096 (43 M10K), audio_out 935, OSDs 1,061 (8), pll_hdmi_adj 547, pll_cfg 685 |
+| Strippable extras | Hq2x 668 + 14 M10K, video_freak 331, lightgun 145, 2 × Game Genie 2,898 | | | |
+
+### The sum (fitted numbers)
+- **ALMs:** framework 7,098 + gen(S32X) 6,801 + MCD 4,661 (no GG) + 32X 9,199 + glue ≈ 3,000 (hps_io 754, mixer w/o Hq2x ~200, sdram+ddram ~240, pll_cfg 685, cart 191, audio/misc) ≈ **30,800 = 73 %**. Below the 90 % gate with ~11,000 ALMs of headroom (Nuked sub-68000 +1,800 and telemetry would fit).
+- **M10K:** framework 59 + gen(S32X) 153 + MCD 285 (PCM → SDRAM via `pcm_mem.sv`) + 32X 15 (+1 line buffer) + mixer 1 + backup RAM 8 + tmpram 1 ≈ **523 = 95 %** with the 68K work RAM on chip; **≈ 459 = 83 %** with the work RAM in SDRAM as MegaCD_ORIG does it. The 92 % gate therefore requires **work RAM in SDRAM** (port the old gen's `RAM_CE_N`/`RFS` path into the new gen, or reuse the MegaCD top's mapping) — or ×40-mode repacking of VRAM/Word RAM if that proves easier.
+- **Bandwidth:** PASS only with frame buffers + SH-2 RAM on DDR3 (`phase0/BANDWIDTH.md`).
+
+### GO / NO-GO: **GO.**
+Conditions: fpgagen MD (S32X revision), frame buffers + SH-2 RAM on DDR3, PCM RAM and 68K work RAM in SDRAM, extras stripped. Timing: the SH-2s close at 53.69 MHz at 60 % utilisation; the fight will be at ~75 % and on the SDRAM/DDR3 crossings.
+
+### SH-2 shrink verdict
+At 4,109 ALMs / 4 M10K each the SH-2 is already lean; nothing large can be removed without changing behaviour. Ranked candidates (per CPU): UBC 89 (no game uses the break controller — remove, keep reads returning 0), SCI 100 (the master/slave serial link — keep unless a title is proven not to use it), MULT's two 32×32 multipliers → one 33×33 signed (saves 3 DSP each, DSP is not scarce). Total realistic saving ≈ 200–400 ALMs across both CPUs. The 2-way cache mode (CCR.TW) is implemented; do not reduce associativity — it is visible to timing-sensitive code. The exact 3-of-7 clock enable (23.01 MHz) should be restored for accuracy; it also loosens the SH-2 paths relative to the current /2.
+
+### Sub-CPU option (user 2026-09-09: NukedMD parts allowed where they slot in)
+Nuked sub-68000 (`m68kcpu`): 3,813 ALMs + 14 M10K vs fx68k 2,006 + 6. Slots in through the NukedMD project's `MC68K.vhd` wrapper (226 changed lines) and buys the verificator's VAR/REG8030 results on the sub side. Affordable in ALMs; the +8 M10K only if work RAM goes to SDRAM. Decide in Phase 1 after the base fit.
