@@ -3,7 +3,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 library STD;
 use IEEE.NUMERIC_STD.ALL;
 library work;
-use work.ASIC_PKG.all; 
+use work.ASIC_PKG.all;
 
 
 entity ASIC is
@@ -12,7 +12,7 @@ entity ASIC is
 		RST_N				: in std_logic;
 		ENABLE			: in std_logic;
 		CLK50_EN		: in std_logic;	-- 50 MHz enable: only the sub-CPU clock phase counter (12.5 MHz) steps on it
-		
+
 		S68K_A   		: in std_logic_vector(23 downto 1);
 		S68K_DI			: in std_logic_vector(15 downto 0);
 		S68K_DO			: out std_logic_vector(15 downto 0);
@@ -29,7 +29,7 @@ entity ASIC is
 		S68K_CE_F		: out std_logic;
 		S68K_CE_R		: out std_logic;
 		S68K_CLK		: out std_logic;	-- sub-CPU clock level (high from the R enable to the F enable), for the gate-level 68000
-		
+
 		EXT_VA   		: in std_logic_vector(17 downto 1);
 		EXT_VDI			: in std_logic_vector(15 downto 0);
 		EXT_VDO			: out std_logic_vector(15 downto 0);
@@ -43,26 +43,26 @@ entity ASIC is
 		EXT_RAS2_N		: in std_logic;
 		EXT_ROM_N		: in std_logic;
 		EXT_FDC_N		: in std_logic;
-		
+
 		PRG_A				: out std_logic_vector(17 downto 0);
 		PRG_DI			: in std_logic_vector(15 downto 0);
 		PRG_DO			: out std_logic_vector(15 downto 0);
-		PRG_WRL_N		: out std_logic;	
-		PRG_WRH_N		: out std_logic;	
+		PRG_WRL_N		: out std_logic;
+		PRG_WRH_N		: out std_logic;
 		PRG_OE_N			: out std_logic;
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
-		
+
 		PCM_A				: out std_logic_vector(12 downto 0);
 		PCM_DI			: out std_logic_vector(7 downto 0);
 		PCM_WE_N			: out std_logic;
 		PCM_N				: out std_logic;
 		PCM_RDY			: in std_logic;
-		
+
 		ROM_DI			: in std_logic_vector(15 downto 0);
 		ROM_CE_N			: out std_logic;
 		ROM_RDY			: in std_logic;
-		
+
 		PRAM_N			: out std_logic;
 		BRAM_N			: out std_logic;
 		BROM_N			: out std_logic;
@@ -72,21 +72,21 @@ entity ASIC is
 		CUWE_N			: out std_logic;
 		CDC_INT_N		: in std_logic;
 		ERES_N			: out std_logic;
-		
+
 		CDC_HDI			: in std_logic_vector(7 downto 0);
 		CDC_HRD_N		: out std_logic;
 		CDC_DTEN_N		: in std_logic;
 		CDC_WAIT_N		: in std_logic;
-		
+
 		CD_DI				: in std_logic_vector(15 downto 0);
 		CD_SC_WR			: in std_logic;
-		
+
 		CDD_STAT			: in std_logic_vector(39 downto 0);
 		CDD_COMM			: out std_logic_vector(39 downto 0);
 		CDD_SEND			: out std_logic;
 		CDD_REC			: in std_logic;
 		CDD_DM			: in std_logic;
-		
+
 		WORDRAM0_A   	: out std_logic_vector(15 downto 0);
 		WORDRAM0_DI		: in std_logic_vector(15 downto 0);
 		WORDRAM0_DO		: out std_logic_vector(15 downto 0);
@@ -95,10 +95,10 @@ entity ASIC is
 		WORDRAM1_DI		: in std_logic_vector(15 downto 0);
 		WORDRAM1_DO		: out std_logic_vector(15 downto 0);
 		WORDRAM1_WR		: out std_logic;
-		
+
 		FD_DAT			: out std_logic_vector(10 downto 0);
 		FD_WR				: out std_logic;
-		
+
 		LED_RED			: out std_logic;
 		LED_GREEN		: out std_logic
 	);
@@ -107,12 +107,12 @@ end ASIC;
 architecture rtl of ASIC is
 
 	constant VER : std_logic_vector(3 downto 0) := x"0";
-	
+
 	signal EN 							: std_logic;
 	signal CLK_CNT 					: unsigned(1 downto 0) := (others => '0');
 	signal CLK_12M_F 					: std_logic;
 	signal CLK_12M_R 					: std_logic;
-	
+
 	signal M68K_GA_SEL 				: std_logic;
 	signal S68K_GA_SEL 				: std_logic;
 	signal S68K_SC_SEL 				: std_logic;
@@ -141,8 +141,8 @@ architecture rtl of ASIC is
 	signal S68K_WORDRAM_DO 			: std_logic_vector(15 downto 0);
 	signal S68K_MDR 					: std_logic_vector(15 downto 0);
 	signal RFS_PRGRAM_DTACK_N 		: std_logic;
-	
-		
+
+
 	--PRG_RAM
 	signal PRMS 						: PrgRamState_t;
 	signal PRSS 						: PrgRamState_t;
@@ -154,7 +154,7 @@ architecture rtl of ASIC is
 	signal PRG_RAM_RFS 				: std_logic;
 	signal PRG_RAM_RFS_TIMER 		: unsigned(9 downto 0);
 	signal PRG_RAM_RFS_SCHED 		: std_logic;
-	
+
 	--WORD_RAM
 	signal WR0A 						: WordRamAccess_t;
 	signal WR1A 						: WordRamAccess_t;
@@ -169,13 +169,13 @@ architecture rtl of ASIC is
 	signal WR0R 						: WordRam_r;
 	signal WR1R 						: WordRam_r;
 	signal LAST_M68K_WORDRAM_DO	: std_logic_vector(15 downto 0);
-	
+
 	--BROM
 	signal ROMS 						: RomState_t;
 	signal M68K_ROM_DTACK_N 		: std_logic;
 	signal M68K_ROM_DO 				: std_logic_vector(15 downto 0);
 	signal M68K_ROM_SEL 				: std_logic;
-	
+
 	--Grafics
 	signal GS 							: GfxState_t;
 	signal GFX 							: Graphic_r;
@@ -191,7 +191,7 @@ architecture rtl of ASIC is
 	signal GFX_ADDR 					: std_logic_vector(17 downto 1);
 	signal GFX_SEL 					: std_logic;
 	signal GFX_RMW 					: std_logic;
-	
+
 	--DMA
 	signal DS 							: DMAState_t;
 	signal DMA_ADDR 					: std_logic_vector(18 downto 1);
@@ -201,7 +201,7 @@ architecture rtl of ASIC is
 	signal PR_DMA_RUN 				: std_logic;
 	signal WR_DMA_RUN 				: std_logic;
 	signal PCM_DMA_RUN 				: std_logic;
-	
+
 	--G/A registers
 	signal RES0 						: std_logic;
 	signal LEDR 						: std_logic;
@@ -251,7 +251,7 @@ architecture rtl of ASIC is
 	signal HOCK 						: std_logic;
 	signal CDDS 						: std_logic_vector(39 downto 0);
 	signal CDDC 						: std_logic_vector(39 downto 0);
-	
+
 	signal MAIN_RST_EXEC 			: std_logic;
 	signal SUB_RST_EXEC 				: std_logic;
 	signal MCD_RST_DONE 				: std_logic;
@@ -289,7 +289,7 @@ architecture rtl of ASIC is
 	signal SW_CLR 						: std_logic;
 	signal TIMER_SET 					: std_logic;
 	signal GEN_S68K_HALT				: std_logic;
-	
+
 	signal PCMA 						: PcmAccess_t;
 	signal PCM_DMA_ADDR 				: std_logic_vector(12 downto 0);
 	signal PCM_DMA_DO 				: std_logic_vector(7 downto 0);
@@ -297,15 +297,15 @@ architecture rtl of ASIC is
 	signal PCM_S68K_HALT 			: std_logic;
 	signal PCM_HALT_WAIT 			: unsigned(1 downto 0);
 	signal PCM_RD_SEEN				: std_logic;		-- a sub-CPU wave RAM read has been issued to the SDRAM path (PCM_RDY fell)
-	
+
 	signal HS 							: HaltState_t;
 	signal HALT_WAIT 					: unsigned(1 downto 0);
 	signal S68K_HALT 					: std_logic;
-			
+
 begin
 
 	EN <= ENABLE;
-	
+
 	process( CLK )
 	begin
 		if rising_edge(CLK) then
@@ -314,11 +314,11 @@ begin
 			end if;
 		end if;
 	end process;
-	
+
 	CLK_12M_F <= CLK50_EN when CLK_CNT = "01" else '0';
 	CLK_12M_R <= CLK50_EN when CLK_CNT = "11" else '0';
-	
-	
+
+
 	--Reset
 	process( RST_N, CLK )
 	begin
@@ -353,7 +353,7 @@ begin
 			--RET_SET <= '0';
 			--DMNA_REQ <= '0';
 			--DMNA_SET <= '0';
-			
+
 			MODE <= '0';
 		elsif rising_edge(CLK) then
 			if M68K_GA_SEL = '1' and EXT_VA(5 downto 1) = "00001" and EXT_RNW = '0' and EXT_LDS_N = '0' and M68K_REG_DTACK_N = '1' then
@@ -364,7 +364,7 @@ begin
 					DMNA1 <= '1';
 				end if;
 			end if;
-				
+
 			if EN = '1' then
 				if S68K_GA_SEL = '1' and S68K_A(7 downto 1) = "0000001" and S68K_RNW = '0' and S68K_REG_DTACK_N = '1' then
 					if S68K_DI(0) = '1' then
@@ -375,14 +375,14 @@ begin
 					if RET1 /= S68K_DI(0) then
 						DMNA1 <= '0';
 					end if;
-					
+
 					MODE <= S68K_DI(2);
 				end if;
 			end if;
 		end if;
 	end process;
-	
-	
+
+
 	--DMA
 	process( RST_N, CLK )
 	begin
@@ -452,14 +452,14 @@ begin
 				if CDC_DTEN_N = '1' and OLD_CDC_DTEN_N = '0' then
 					EDT <= '1';
 				end if;
-				
+
 				case DS is
 					when DS_IDLE =>
 						if CDC_DTEN_N = '0' then
 							if CDC_WAIT_N = '1' then
 								CDC_HRD <= '1';
 								DS <= DS_CDC_READ;
-								
+
 								DMA_RUN <= DD(2);
 							end if;
 							EDT <= '0';
@@ -470,11 +470,11 @@ begin
 							end if;
 							-- EDT is latched on the DTEN 0->1 edge above, not set here on idle.
 						end if;
-						
+
 					when DS_CDC_READ =>
 						if CDC_WAIT_N = '0' then
 							CDC_HRD <= '0';
-							
+
 							if DMA_BYTE = '0' and DD /= "100" then
 								DMA_DAT(15 downto 8) <= CDC_HDI;
 								DMA_BYTE <= '1';
@@ -486,32 +486,32 @@ begin
 								DS <= DS_WRITE;
 							end if;
 						end if;
-					
+
 					when DS_WRITE =>
 						case DD is
 							when "010" | "011" =>
 								HD <= DMA_DAT;
 								DS <= DS_WRITE_WAIT;
-							
+
 							when "100" =>
 								if PCM_DMA_RUN = '1' then
 									DS <= DS_WRITE_WAIT;
 								end if;
-							
+
 							when "101" =>
 								if PR_DMA_RUN = '1' then
 									DS <= DS_WRITE_WAIT;
 								end if;
-								
+
 							when "111" =>
 								if WR_DMA_RUN = '1' then
 									DS <= DS_WRITE_WAIT;
 								end if;
-								
+
 							when others =>
 								DS <= DS_IDLE;
 						end case;
-						
+
 					when DS_WRITE_WAIT =>
 						case DD is
 							when "010" =>
@@ -519,47 +519,47 @@ begin
 									DSR <= '0';
 									DS <= DS_IDLE;
 								end if;
-								
+
 							when "011" =>
 								if SUB_CPU_CDC_READ = '1' then
 									DSR <= '0';
 									DS <= DS_IDLE;
 								end if;
-							
+
 							when "100" =>
 								if PCM_DMA_RUN = '0' then
 									DMA_ADDR <= std_logic_vector( unsigned(DMA_ADDR) + 1 );
 									DS <= DS_IDLE;
 								end if;
-							
+
 							when "101" =>
 								if PR_DMA_RUN = '0' then
 									DMA_ADDR <= std_logic_vector( unsigned(DMA_ADDR) + 1 );
 									DS <= DS_IDLE;
 								end if;
-								
+
 							when "111" =>
 								if WR_DMA_RUN = '0' then
 									DMA_ADDR <= std_logic_vector( unsigned(DMA_ADDR) + 1 );
 									DS <= DS_IDLE;
 								end if;
-								
+
 							when others =>
 								DS <= DS_IDLE;
 						end case;
-						
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
+
 	CDC_HRD_N <= not CDC_HRD;
-	
-	
+
+
 	--Genesis GA
 	M68K_GA_SEL <= '1' when EXT_FDC_N = '0' and (EXT_LDS_N = '0' or EXT_UDS_N = '0') and EXT_AS_N = '0' else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -579,7 +579,7 @@ begin
 
 		elsif rising_edge(CLK) then
 			MAIN_RST_EXEC <= '0';
-			
+
 			OLD_IEN2 <= IEN(2);
 			-- INT_ACK(2) is decoded combinationally from the sub-CPU's interrupt-acknowledge bus
 			-- cycle, so it stays high for the whole cycle - about 11 CLK edges.  Clearing on the
@@ -596,11 +596,11 @@ begin
 				INT_PEND(2) <= '0';
 				IFL2 <= '0';
 			end if;
-			
+
 			if MAIN_CPU_CDC_READ = '1' and DS = DS_IDLE then
 				MAIN_CPU_CDC_READ <= '0';
 			end if;
-			
+
 			if M68K_GA_SEL = '1' and M68K_REG_DTACK_N = '1' then
 				if EXT_RNW = '0' then
 					case EXT_VA(5 downto 1) is
@@ -772,10 +772,10 @@ begin
 			end if;
 		end if;
 	end process;
-	
+
 	--Genesis BIOS ROM & HINT vector
 	M68K_ROM_SEL <= '1' when EXT_ROM_N = '0' and EXT_VA(17) = '0' and (EXT_LDS_N = '0' or EXT_UDS_N = '0') and EXT_ASEL_N = '0' else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -802,44 +802,44 @@ begin
 							ROMS <= ROMS_WAIT;
 						end if;
 					end if;
-					
+
 				when ROMS_WAIT =>
 					if ROM_RDY = '0' then
 						ROMS <= ROMS_ACCESS;
 					end if;
-				
+
 				when ROMS_ACCESS =>
 					if ROM_RDY = '1' then
 						M68K_ROM_DO <= ROM_DI;
 						M68K_ROM_DTACK_N <= '0';
-						
+
 						ROMS <= ROMS_END;
 					end if;
-					
-				when ROMS_END => 
+
+				when ROMS_END =>
 					if M68K_ROM_DTACK_N = '0' and EXT_ASEL_N = '1' then
 						M68K_ROM_DTACK_N <= '1';
 						ROM_CE_N <= '1';
 						ROMS <= ROMS_IDLE;
 					end if;
-					
+
 				when others => null;
 			end case;
 		end if;
 	end process;
-	
+
 	EXT_DTACK_N <= M68K_REG_DTACK_N and M68K_PRGRAM_DTACK_N and M68K_WORDRAM_DTACK_N and M68K_ROM_DTACK_N;
 	EXT_VDO <= M68K_REG_DO when M68K_REG_DTACK_N = '0' else
 				  M68K_PRGRAM_DO when M68K_PRGRAM_DTACK_N = '0' else
 				  M68K_WORDRAM_DO when M68K_WORDRAM_DTACK_N = '0' else
 				  M68K_ROM_DO when M68K_ROM_DTACK_N = '0' else
 				  M68K_REG_DO;
-				  
-	
+
+
 	--S68K GA
 	S68K_GA_SEL <= '1' when S68K_A(19 downto 8) = x"F80" and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
 	S68K_SC_SEL <= '1' when S68K_A(19 downto 8) = x"F81" and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
-				
+
 	process( RST_N, CLK )
 	variable NEW_STA : std_logic_vector(6 downto 0);
 	variable SC_W_POS : unsigned(5 downto 0);
@@ -889,12 +889,12 @@ begin
 			HOCK_OLD <= '0';
 			SW_CLR <= '0';
 			FD_WR <= '0';
-			
+
 			INT_PEND(3) <= '0';
 			INT_PEND(4) <= '0';
 			INT_PEND(5) <= '0';
 			INT_PEND(6) <= '0';
-			
+
 			CDD_STAT_RECEIVED <= '0';
 			CDD_FRAME_CNT <= (others => '0');
 		elsif rising_edge(CLK) then
@@ -903,16 +903,16 @@ begin
 				if MCD_RST_DONE = '1' then
 					RES0 <= '1';
 				end if;
-				
+
 				DMA_ADDR_SET <= '0';
 				DMA_EDT_CLR <= '0';
 				VW_SET <= '0';
 				FD_WR <= '0';
-				
+
 				if GS = GS_END then
 					GRON <= '0';
 				end if;
-			
+
 				--CDD Status
 				--OLD_IEN4 <= IEN(4);
 				if INT_ACK(4) = '1' and INT_PEND(4) = '1' then
@@ -920,7 +920,7 @@ begin
 --				elsif IEN(4) = '0' and OLD_IEN4 = '1' and INT_PEND(4) = '1' then
 --					INT_PEND(4) <= '0';
 				end if;
-				
+
 				CDD_REC_OLD <= CDD_REC;
 				HOCK_OLD <= HOCK;
 				if CDD_REC = '1' and CDD_REC_OLD = '0' then
@@ -928,7 +928,7 @@ begin
 				elsif HOCK = '1' and HOCK_OLD = '0' then
 					CDD_STAT_RECEIVED <= '1';
 				end if;
-				
+
 				if CDD_STAT_RECEIVED = '1' and HOCK = '1' then
 					CDDS <= CDD_STAT;
 					CDD_STAT_RECEIVED <= '0';
@@ -956,11 +956,11 @@ begin
 						CDD_FRAME_CNT <= CDD_FRAME_CNT + 1;
 					end if;
 				end if;
-				
+
 				if SUB_CPU_CDC_READ = '1' and DS = DS_IDLE then
 					SUB_CPU_CDC_READ <= '0';
 				end if;
-				
+
 				if S68K_GA_SEL = '1' and S68K_REG_DTACK_N = '1' then
 					if S68K_RNW = '0' then
 						case S68K_A(7 downto 1) is
@@ -1063,11 +1063,11 @@ begin
 									CS(7)(15 downto 8) <= S68K_DI(15 downto 8);
 								end if;
 							when "0011000" =>			--$FF8030 Timer
-								TM <= S68K_DI(7 downto 0);	
+								TM <= S68K_DI(7 downto 0);
 								TIMER_SET <= '1';
 							when "0011001" =>			--$FF8032 Inerrupt mask control
 								if S68K_LDS_N = '0' then
-									IEN <= S68K_DI(6 downto 1);	
+									IEN <= S68K_DI(6 downto 1);
 								end if;
 							when "0011010" => null;	--$FF8034 CD fader
 								FD_DAT <= S68K_DI(14 downto 4);
@@ -1083,31 +1083,31 @@ begin
 							when "0100000" => null;	--$FF8040 CDD status 8,9 (read only)
 							when "0100001" =>			--$FF8042 CDD command 0,1
 								if S68K_LDS_N = '0' then
-									CDDC(7 downto 4) <= S68K_DI(3 downto 0);	
+									CDDC(7 downto 4) <= S68K_DI(3 downto 0);
 								end if;
 								if S68K_UDS_N = '0' then
-									CDDC(3 downto 0) <= S68K_DI(11 downto 8);	
+									CDDC(3 downto 0) <= S68K_DI(11 downto 8);
 								end if;
 							when "0100010" =>			--$FF8044 CDD command 2,3
 								if S68K_LDS_N = '0' then
-									CDDC(15 downto 12) <= S68K_DI(3 downto 0);	
+									CDDC(15 downto 12) <= S68K_DI(3 downto 0);
 								end if;
 								if S68K_UDS_N = '0' then
-									CDDC(11 downto 8) <= S68K_DI(11 downto 8);	
+									CDDC(11 downto 8) <= S68K_DI(11 downto 8);
 								end if;
 							when "0100011" =>			--$FF8046 CDD command 4,5
 								if S68K_LDS_N = '0' then
-									CDDC(23 downto 20) <= S68K_DI(3 downto 0);	
+									CDDC(23 downto 20) <= S68K_DI(3 downto 0);
 								end if;
 								if S68K_UDS_N = '0' then
-									CDDC(19 downto 16) <= S68K_DI(11 downto 8);	
+									CDDC(19 downto 16) <= S68K_DI(11 downto 8);
 								end if;
 							when "0100100" =>			--$FF8048 CDD command 6,7
 								if S68K_LDS_N = '0' then
-									CDDC(31 downto 28) <= S68K_DI(3 downto 0);	
+									CDDC(31 downto 28) <= S68K_DI(3 downto 0);
 								end if;
 								if S68K_UDS_N = '0' then
-									CDDC(27 downto 24) <= S68K_DI(11 downto 8);	
+									CDDC(27 downto 24) <= S68K_DI(11 downto 8);
 								end if;
 							when "0100101" =>			--$FF804A CDD command 8,9
 								if S68K_LDS_N = '0' then
@@ -1126,10 +1126,10 @@ begin
 								SC1 <= S68K_DI(7 downto 4);
 							when "0100111" =>			--$FF804E Font bit
 								if S68K_LDS_N = '0' then
-									SB(7 downto 0) <= S68K_DI(7 downto 0);	
+									SB(7 downto 0) <= S68K_DI(7 downto 0);
 								end if;
 								if S68K_UDS_N = '0' then
-									SB(15 downto 8) <= S68K_DI(15 downto 8);	
+									SB(15 downto 8) <= S68K_DI(15 downto 8);
 								end if;
 							when "0101000" => null;	--$FF8050 Font data (read only)
 							when "0101001" => null;	--$FF8052 Font data (read only)
@@ -1242,9 +1242,9 @@ begin
 							when "0010111" =>			--$FF802E Communication status 7
 								S68K_REG_DO <= CS(7);
 							when "0011000" =>			--$FF8030 Timer
-								S68K_REG_DO <= x"00" & TM;	
+								S68K_REG_DO <= x"00" & TM;
 							when "0011001" =>			--$FF8032 Inerrupt mask control
-								S68K_REG_DO <= x"00" & "0" & IEN & "0";	
+								S68K_REG_DO <= x"00" & "0" & IEN & "0";
 							when "0011010" =>			--$FF8034 CD fader
 								S68K_REG_DO <= x"0000";
 							when "0011011" =>			--$FF8036 CDD control
@@ -1270,9 +1270,9 @@ begin
 							when "0100101" =>			--$FF804A CDD command 8,9
 								S68K_REG_DO <= x"0" & CDDC(35 downto 32) & x"0" & CDDC(39 downto 36);
 							when "0100110" =>			--$FF804C Font color
-								S68K_REG_DO <= x"00" & SC1 & SC0;	
+								S68K_REG_DO <= x"00" & SC1 & SC0;
 							when "0100111" =>			--$FF804E Font bit
-								S68K_REG_DO <= SB;	
+								S68K_REG_DO <= SB;
 							when "0101000" =>			--$FF8050 Font data
 								S68K_REG_DO <= GetFontData(SB, SC0, SC1, 0);
 							when "0101001" =>			--$FF8052 Font data
@@ -1282,7 +1282,7 @@ begin
 							when "0101011" =>			--$FF8056 Font data
 								S68K_REG_DO <= GetFontData(SB, SC0, SC1, 3);
 							when "0101100" =>			--$FF8058 Stamp data size
-								S68K_REG_DO <= GRON & "000000000000" & SMS & STS & RPT;	
+								S68K_REG_DO <= GRON & "000000000000" & SMS & STS & RPT;
 							when "0101101" =>			--$FF805A Stamp map base address
 								S68K_REG_DO <= SMBA & "00000";
 							when "0101110" =>			--$FF805C Image buffer V cell size
@@ -1308,12 +1308,12 @@ begin
 				elsif S68K_REG_DTACK_N = '0' and S68K_LDS_N = '1' and S68K_UDS_N = '1' then
 					S68K_REG_DTACK_N <= '1';
 				end if;
-			
+
 				--Subcode
 				if (INT_ACK(6) = '1' or IEN(6) = '0') and INT_PEND(6) = '1' then
 					INT_PEND(6) <= '0';
 				end if;
-				
+
 				CD_SC_WR_OLD <= CD_SC_WR;
 				if CD_SC_WR = '1' and CD_SC_WR_OLD = '0' then
 					NEW_STA := std_logic_vector( (SAOR&unsigned(STA)) + 49);
@@ -1326,16 +1326,16 @@ begin
 					SC_CNT <= SC_CNT + 1;
 					if SC_CNT = 48 then
 						SC_CNT <= (others => '0');
-						
+
 						STA <= NEW_STA(5 downto 0);
-						SAOR <= '0'; 
-						
+						SAOR <= '0';
+
 						if IEN(6) = '1' then
 							INT_PEND(6) <= '1';
 						end if;
 					end if;
 				end if;
-			
+
 				if S68K_SC_SEL = '1' and S68K_REG_DTACK_N = '1' then-- and PCM_S68K_HALT = '0'
 					if S68K_RNW = '1' then
 --						S68K_REG_DO <= (others => '0');
@@ -1345,24 +1345,24 @@ begin
 				elsif S68K_REG_DTACK_N = '0' and S68K_LDS_N = '1' and S68K_UDS_N = '1' then
 					S68K_REG_DTACK_N <= '1';
 				end if;
-				
+
 				--Timer
 				if (INT_ACK(3) = '1' or IEN(3) = '0') and INT_PEND(3) = '1' then
 					INT_PEND(3) <= '0';
 				end if;
-				
+
 				if CLK_12M_F = '1' then
 					TIME_CLK_CNT <= TIME_CLK_CNT + 1;
 					if TIME_CLK_CNT = "101111111" then	-- 384 clocks of 12.5 MHz = 30.72 us (was 412 of 13.42 MHz)
 						TIME_CLK_CNT <= (others => '0');
-						
+
 						if SW_CLR = '1' then
 							SW <= (others => '0');
 							SW_CLR <= '0';
 						else
 							SW <= std_logic_vector( unsigned(SW) + 1 );
 						end if;
-						
+
 						if TIMER_SET = '1' then
 							TIMER <= unsigned(TM);
 							TIMER_SET <= '0';
@@ -1376,7 +1376,7 @@ begin
 						end if;
 					end if;
 				end if;
-			
+
 				--CDC interrupt
 				if CLK_12M_F = '1' then
 					OLD_CDC_INT_N <= CDC_INT_N;
@@ -1392,19 +1392,19 @@ begin
 			end if;
 		end if;
 	end process;
-	
+
 	CDD_COMM <= CDDC;
 
 	LED_RED <= LEDR;
 	LED_GREEN <= LEDG;
-	
-	
-	
+
+
+
 	--PRG-RAM
 	S68K_PRG_RAM_SEL <= '1' when S68K_A(19) = '0' and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
 	M68K_PRG_RAM_SEL <= '1' when EXT_ROM_N = '0' and EXT_VA(17) = '1' and (EXT_LDS_N = '0' or EXT_UDS_N = '0') and EXT_ASEL_N = '0' else '0';
 	DMA_PRG_RAM_SEL <= '1' when DD = "101" and DS = DS_WRITE else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -1428,7 +1428,7 @@ begin
 --					PRG_RAM_RFS_TIMER <= (others => '0');
 --					PRG_RAM_RFS_SCHED <= '1';
 --				end if;
-				
+
 				case PRMS is
 					when PRS_IDLE =>
 						if SBRQ = '0' and SRES = '1' then
@@ -1455,7 +1455,7 @@ begin
 --								PRG_RAM_RFS_TIMER <= (others => '0');
 							end if;
 						end if;
-						
+
 					when PRS_WAIT =>
 						if PRG_RDY = '0' then
 							if PRG_RAM_RD = '1' then
@@ -1464,41 +1464,41 @@ begin
 								PRMS <= PRS_WRITE;
 							end if;
 						end if;
-					
+
 					when PRS_READ =>
 						if PRG_RDY = '1' then
 							PRG_RAM_RD <= '0';
-							
+
 							M68K_PRGRAM_DO <= PRG_DI;
 							M68K_PRGRAM_DTACK_N <= '0';
 							PRMS <= PRS_END;
 						end if;
-					
+
 					when PRS_WRITE =>
 						PRG_RAM_WRL <= '0';
 						PRG_RAM_WRH <= '0';
-						
+
 						M68K_PRGRAM_DTACK_N <= '0';
 						PRMS <= PRS_END;
-					
+
 					when PRS_REFRESH_WAIT =>
 						if PRG_RDY = '0' then
 							PRMS <= PRS_REFRESH;
 						end if;
-						
+
 					when PRS_REFRESH =>
 						if PRG_RDY = '1' then
 							PRG_RAM_RFS <= '0';
 							PRMS <= PRS_REFRESH_END;
 						end if;
-						
-					when PRS_END => 
+
+					when PRS_END =>
 						if M68K_PRGRAM_DTACK_N = '0' and EXT_ASEL_N = '1' then
 							M68K_PRGRAM_DTACK_N <= '1';
 							PRMS <= PRS_IDLE;
 						end if;
-						
-					when PRS_REFRESH_END => 
+
+					when PRS_REFRESH_END =>
 						if RFS_PRGRAM_DTACK_N = '0' and EXT_ASEL_N = '1' then
 							RFS_PRGRAM_DTACK_N <= '1';
 							PRMS <= PRS_IDLE;
@@ -1506,10 +1506,10 @@ begin
 --							PRG_RAM_RFS_SCHED <= '0';
 --							PRMS <= PRS_IDLE;
 						end if;
-						
+
 					when others => null;
 				end case;
-				
+
 				-- DTACK follows the CPU's strobes in every state: with posted writes and the early read
 				-- acknowledge the CPU can end its cycle before the SDRAM transfer is over, and a DTACK
 				-- left asserted would terminate its next bus cycle at once (build 21 BIOS corruption).
@@ -1551,14 +1551,9 @@ begin
 								PRG_RAM_WRL <= not S68K_LDS_N and not S68K_RNW;
 								PRG_RAM_WRH <= not S68K_UDS_N and not S68K_RNW;
 								PRG_RAM_RD <= S68K_RNW;
-								-- Writes are posted: address and data are latched here, so the CPU can be
-								-- acknowledged at once (real PRG-RAM takes writes without wait states); the
-								-- next PRG-RAM access still waits for this one to reach the SDRAM controller.
-								if S68K_RNW = '0' then
-									S68K_PRGRAM_DTACK_N <= '0';
-								end if;
+								-- (fx68k sub-CPU: writes are acknowledged in PRS_WRITE, reads in PRS_READ, as upstream)
 								PRSS <= PRS_WAIT;
-							else 
+							else
 								PRG_RAM_WRL <= '0';
 								PRG_RAM_WRH <= '0';
 								PRG_RAM_RD <= '0';
@@ -1571,78 +1566,68 @@ begin
 --							PRSS <= PRS_REFRESH_WAIT;
 --							PRG_RAM_RFS_TIMER <= (others => '0');
 						end if;
-					
+
 					when PRS_WAIT =>
 						if PRG_RDY = '0' then
 							if PRG_RAM_RD = '1' then
-								-- The SDRAM controller has accepted the read: from here the data arrives in a fixed
-								-- ~60 ns, so DTACK can go now. The 68000 latches data one clock (80 ns) after it
-								-- samples DTACK; acknowledging only once the data was back cost the die-accurate
-								-- CPU a wait state on nearly every PRG-RAM fetch (measured 93-105 ns AS to DTACK)
-								-- where the real PRG-RAM answers with none (mcd-verificator VAR test).
-								S68K_PRGRAM_DTACK_N <= '0';
 								PRSS <= PRS_READ;
 							else
 								PRSS <= PRS_WRITE;
 							end if;
 						end if;
-						
+
 					when PRS_READ =>
 						if PRG_RDY = '1' then
 							PRG_RAM_RD <= '0';
-	
+
 							S68K_PRGRAM_DO <= PRG_DI;
-							
+							S68K_PRGRAM_DTACK_N <= '0';   -- data is back: acknowledge now (fx68k latches on its next enable)
 							PRSS <= PRS_END;
 						end if;
-					
+
 					when PRS_WRITE =>
 						PRG_RAM_WRL <= '0';
 						PRG_RAM_WRH <= '0';
-						-- No DTACK here: the CPU's write was acknowledged when it was posted (PRS_IDLE). Asserting it
-						-- again once the SDRAM has accepted the write, up to ~300 ns later under contention, landed
-						-- in the CPU's NEXT bus cycle and terminated it with S68K_PRGRAM_DO (the previous read's
-						-- data), whatever its target: random sub-CPU corruption a few times a minute, and the
-						-- "0 ns AS->DTACK" minimum seen in the telemetry since build 21.
+						S68K_PRGRAM_DTACK_N <= '0';   -- write issued: acknowledge (upstream timing)
 						PRSS <= PRS_END;
-						
+
 					when PRS_DMA_WAIT =>
 						if PRG_RDY = '0' then
 							PRSS <= PRS_DMA_WRITE;
 						end if;
-						
+
 					when PRS_DMA_WRITE =>
 						if PRG_RDY = '1' then
 							PRSS <= PRS_DMA_END;
-	
+
 							PRG_RAM_WRL <= '0';
 							PRG_RAM_WRH <= '0';
 						end if;
-						
+
 					when PRS_REFRESH_WAIT =>
 						if PRG_RDY = '0' then
 							PRSS <= PRS_REFRESH;
 						end if;
-						
+
 					when PRS_REFRESH =>
 						if PRG_RDY = '1' then
 							PRG_RAM_RFS <= '0';
 							PRSS <= PRS_REFRESH_END;
 						end if;
-						
+
 					when PRS_END =>
 						-- the CPU has ended its cycle (DTACK was released below, or the strobes are already high)
 						if S68K_PRGRAM_DTACK_N = '1' or (S68K_LDS_N = '1' and S68K_UDS_N = '1') then
 							PRSS <= PRS_IDLE;
 						end if;
-						
-					when PRS_DMA_END => 
+
+					when PRS_DMA_END =>
 						if PR_DMA_RUN = '1' then
 							PR_DMA_RUN <= '0';
 							PRSS <= PRS_IDLE;
 						end if;
-						
-					when PRS_REFRESH_END => 
+
+					when PRS_REFRESH_END =>
 						if RFS_PRGRAM_DTACK_N = '0' and S68K_LDS_N = '1' and S68K_UDS_N = '1' then
 							RFS_PRGRAM_DTACK_N <= '1';
 							PRSS <= PRS_IDLE;
@@ -1650,22 +1635,22 @@ begin
 							PRG_RAM_RFS_SCHED <= '0';
 							PRSS <= PRS_IDLE;
 						end if;
-						
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
-	PRAM_N <= '0' when PRMS /= PRS_IDLE or PRSS /= PRS_IDLE else '1';	
+
+	PRAM_N <= '0' when PRMS /= PRS_IDLE or PRSS /= PRS_IDLE else '1';
 	PRG_A <= PRG_RAM_ADDR;
 	PRG_DO <= PRG_RAM_DO;
 	PRG_WRL_N <= not PRG_RAM_WRL;
 	PRG_WRH_N <= not PRG_RAM_WRH;
 	PRG_OE_N <= not PRG_RAM_RD;
 	PRG_RFS <= PRG_RAM_RFS;
-	
-	
+
+
 	--WORD-RAM
 	process( RST_N, CLK )
 	begin
@@ -1680,14 +1665,14 @@ begin
 						if WR0R.EXEC = '1' then
 							WR0S <= WRS_READ;
 						end if;
-						
+
 					when WRS_READ =>
 						case WR0R.DOT_IMAGE is
 							when "11" =>   WORD_RAM_1M0_DI <= x"0" & WORDRAM0_DI( 7 downto  4) & x"0" & WORDRAM0_DI( 3 downto 0);
 							when "10" =>   WORD_RAM_1M0_DI <= x"0" & WORDRAM0_DI(15 downto 12) & x"0" & WORDRAM0_DI(11 downto 8);
 							when others => WORD_RAM_1M0_DI <= WORDRAM0_DI;
 						end case;
-						
+
 						if WR0R.RNW(0) = '0' then
 							WORD_RAM_1M0_DO(3 downto 0) <= GetWriteColor(WR0R.DO( 3 downto 0), WORDRAM0_DI( 3 downto  0), WR0R.PM);
 						else
@@ -1709,24 +1694,24 @@ begin
 							WORD_RAM_1M0_DO(15 downto 12) <= WORDRAM0_DI(15 downto 12);
 						end if;
 						WORD_RAM_1M0_WR <= '1';
-						
+
 						WR0S <= WRS_WRITE;
-					
+
 					when WRS_WRITE =>
 						WORD_RAM_1M0_WR <= '0';
 						WR0S <= WRS_END;
-					
+
 					when WRS_END =>
 						if WR0R.EXEC = '0' then
 							WR0S <= WRS_IDLE;
 						end if;
-					
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -1740,14 +1725,14 @@ begin
 						if WR1R.EXEC = '1' then
 							WR1S <= WRS_READ;
 						end if;
-					
+
 					when WRS_READ =>
 						case WR1R.DOT_IMAGE is
 							when "11" =>   WORD_RAM_1M1_DI <= x"0" & WORDRAM1_DI( 7 downto  4) & x"0" & WORDRAM1_DI( 3 downto 0);
 							when "10" =>   WORD_RAM_1M1_DI <= x"0" & WORDRAM1_DI(15 downto 12) & x"0" & WORDRAM1_DI(11 downto 8);
 							when others => WORD_RAM_1M1_DI <= WORDRAM1_DI;
 						end case;
-						
+
 						if WR1R.RNW(0) = '0' then
 							WORD_RAM_1M1_DO(3 downto 0) <= GetWriteColor(WR1R.DO(3 downto 0), WORDRAM1_DI(3 downto  0), WR1R.PM);
 						else
@@ -1769,29 +1754,29 @@ begin
 							WORD_RAM_1M1_DO(15 downto 12) <= WORDRAM1_DI(15 downto 12);
 						end if;
 						WORD_RAM_1M1_WR <= '1';
-						
+
 						WR1S <= WRS_WRITE;
-					
+
 					when WRS_WRITE =>
 						WORD_RAM_1M1_WR <= '0';
 						WR1S <= WRS_END;
-					
+
 					when WRS_END =>
 						if WR1R.EXEC = '0' then
 							WR1S <= WRS_IDLE;
 						end if;
-					
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
-	
+
+
 	M68K_WORD_RAM_SEL <= '1' when EXT_RAS2_N = '0' and (EXT_LDS_N = '0' or EXT_UDS_N = '0') and EXT_ASEL_N = '0' else '0';
 	S68K_WORD_RAM_SEL <= '1' when S68K_A(19 downto 16) >= x"8" and S68K_A(19 downto 16) <= x"D" and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
 	DMA_WORD_RAM_SEL <= '1' when DD = "111" and DS = DS_WRITE else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -1808,7 +1793,7 @@ begin
 					when WRA_IDLE =>
 						WR0R.DOT_IMAGE <= (others => '0');
 						if MODE = '1' then	--1M MODE
-							if RET1 = '0' then 
+							if RET1 = '0' then
 								if M68K_WORD_RAM_SEL = '1' and M68K_WORDRAM_DTACK_N = '1' then
 									WR0R.A <= EXT_VA(16 downto 1);
 									WR0R.DO <= EXT_VDI;
@@ -1887,7 +1872,7 @@ begin
 								S68K_WORDRAM_DTACK_N <= '0';
 							end if;
 						end if;
-					
+
 					when WRA_M68K_ACCESS =>
 						if WR0S = WRS_END then
 							WR0R.EXEC <= '0';
@@ -1900,62 +1885,62 @@ begin
 							M68K_WORDRAM_DTACK_N <= '0';
 							WR0A <= WRA_M68K_END;
 						end if;
-					
+
 					when WRA_S68K_ACCESS =>
 						if WR0S = WRS_END then
 							WR0R.EXEC <= '0';
 							S68K_WORDRAM_DO <= WORD_RAM_1M0_DI;
-								
+
 							WR0A <= WRA_S68K_END;
 						end if;
-					
+
 					when WRA_DMA_ACCESS =>
 						if WR0S = WRS_END then
 							WR0R.EXEC <= '0';
-								
+
 							WR0A <= WRA_DMA_END;
 						end if;
-						
+
 					when WRA_GFX_ACCESS =>
 						if WR0S = WRS_END then
 							WR0R.EXEC <= '0';
 							GFX_WORDRAM_DO <= WORD_RAM_1M0_DI;
-								
+
 							WR0A <= WRA_GFX_END;
 						end if;
-	
-					when WRA_M68K_END => 
+
+					when WRA_M68K_END =>
 						if M68K_WORDRAM_DTACK_N = '0' and EXT_ASEL_N = '1' then
 							M68K_WORDRAM_DTACK_N <= '1';
 							WR0A <= WRA_IDLE;
 						end if;
-					
-					when WRA_S68K_END => 
+
+					when WRA_S68K_END =>
 						if S68K_WORDRAM_DTACK_N = '0' and S68K_LDS_N = '1' and S68K_UDS_N = '1' then
 							S68K_WORDRAM_DTACK_N <= '1';
 							WR0A <= WRA_IDLE;
 						end if;
-						
-					when WRA_DMA_END => 
+
+					when WRA_DMA_END =>
 						if WR_DMA_RUN = '1' then
 							WR_DMA_RUN <= '0';
 							WR0A <= WRA_IDLE;
 						end if;
-						
-					when WRA_GFX_END => 
+
+					when WRA_GFX_END =>
 						if WR_GFX_RUN = '1' then
 							WR_GFX_RUN <= '0';
 							WR0A <= WRA_IDLE;
 						end if;
-						
+
 					when others => null;
 				end case;
-				
+
 				case WR1A is
 					when WRA_IDLE =>
 						WR1R.DOT_IMAGE <= (others => '0');
 						if MODE = '1' then	--1M MODE
-							if RET1 = '1' then 
+							if RET1 = '1' then
 								if M68K_WORD_RAM_SEL = '1' and M68K_WORDRAM_DTACK_N = '1' then
 									WR1R.A <= EXT_VA(16 downto 1);
 									WR1R.DO <= EXT_VDI;
@@ -2034,7 +2019,7 @@ begin
 								S68K_WORDRAM_DTACK_N <= '0';
 							end if;
 						end if;
-						
+
 					when WRA_M68K_ACCESS =>
 						if WR1S = WRS_END then
 							WR1R.EXEC <= '0';
@@ -2047,60 +2032,60 @@ begin
 							M68K_WORDRAM_DTACK_N <= '0';
 							WR1A <= WRA_M68K_END;
 						end if;
-					
+
 					when WRA_S68K_ACCESS =>
 						if WR1S = WRS_END then
 							WR1R.EXEC <= '0';
 							S68K_WORDRAM_DO <= WORD_RAM_1M1_DI;
-								
+
 							WR1A <= WRA_S68K_END;
 						end if;
-					
+
 					when WRA_DMA_ACCESS =>
 						if WR1S = WRS_END then
 							WR1R.EXEC <= '0';
-								
+
 							WR1A <= WRA_DMA_END;
 						end if;
-						
+
 					when WRA_GFX_ACCESS =>
 						if WR1S = WRS_END then
 							WR1R.EXEC <= '0';
 							GFX_WORDRAM_DO <= WORD_RAM_1M1_DI;
-								
+
 							WR1A <= WRA_GFX_END;
 						end if;
-						
-					when WRA_M68K_END => 
+
+					when WRA_M68K_END =>
 						if M68K_WORDRAM_DTACK_N = '0' and EXT_ASEL_N = '1' then
 							M68K_WORDRAM_DTACK_N <= '1';
 							WR1A <= WRA_IDLE;
 						end if;
-					
-					when WRA_S68K_END => 
+
+					when WRA_S68K_END =>
 						if S68K_WORDRAM_DTACK_N = '0' and S68K_LDS_N = '1' and S68K_UDS_N = '1' then
 							S68K_WORDRAM_DTACK_N <= '1';
 							WR1A <= WRA_IDLE;
 						end if;
-						
-					when WRA_DMA_END => 
+
+					when WRA_DMA_END =>
 						if WR_DMA_RUN = '1' then
 							WR_DMA_RUN <= '0';
 							WR1A <= WRA_IDLE;
 						end if;
-						
-					when WRA_GFX_END => 
+
+					when WRA_GFX_END =>
 						if WR_GFX_RUN = '1' then
 							WR_GFX_RUN <= '0';
 							WR1A <= WRA_IDLE;
 						end if;
-						
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
+
 	--Graphics
 	process( RST_N, CLK )
 	variable X : std_logic_vector(23 downto 11);
@@ -2130,11 +2115,11 @@ begin
 				elsif IEN(1) = '0' and OLD_IEN1 = '1' and INT_PEND(1) = '1' then
 					INT_PEND(1) <= '0';
 				end if;
-				
+
 				if VW_SET = '1' then
 					VDOTS <= VW;
 				end if;
-				
+
 				if RPT = '1' then
 					if SMS = '0' then
 						X := "00000" & GFX.X(18 downto 11);
@@ -2147,18 +2132,18 @@ begin
 					X := GFX.X(23 downto 11);
 					Y := GFX.Y(23 downto 11);
 				end if;
-				
+
 				if (SMS = '0' and (X(23 downto 19) /= "00000" or Y(23 downto 19) /= "00000")) or
 					(SMS = '1' and (X(23 downto 23) /= "0" or Y(23 downto 23) /= "0")) then
 					OUTSIDE := '1';
 				else
 					OUTSIDE := '0';
 				end if;
-					
+
 				IMAGE_DATA_ADDR := std_logic_vector( (unsigned(ISA) & "000000") + unsigned(IMAGE_LINE&IMAGE_DOT) + (unsigned(IMAGE_CELL) & "000000") );
 				STAMP_N := GFX.SD(10 downto 0);
 				case GS is
-					when GS_IDLE => 
+					when GS_IDLE =>
 						if GRON = '1' and CLK_12M_R = '1' then
 							VA <= TVBA & "00";
 							IMAGE_DOT <= unsigned(DOT);
@@ -2168,15 +2153,15 @@ begin
 							GFX_DO <= x"0000";
 							GS <= GS_XY_READ;
 						end if;
-						
-					when GS_XY_READ => 
+
+					when GS_XY_READ =>
 						if CLK_12M_R = '1' then
 							GFX_ADDR <= VA;
 							GFX_SEL <= '1';
 							GFX_RMW <= '0';
 							GS <= GS_XY_WAIT;
 						end if;
-						
+
 					when GS_XY_WAIT =>
 						if GFX_SEL = '1' and WR_GFX_RUN = '1' then
 							GFX_SEL <= '0';
@@ -2187,7 +2172,7 @@ begin
 								when "10" => 	GFX.DX <= (7 downto 0 => GFX_WORDRAM_DO(15)) & GFX_WORDRAM_DO;
 								when others => GFX.DY <= (7 downto 0 => GFX_WORDRAM_DO(15)) & GFX_WORDRAM_DO;
 							end case;
-							
+
 							VA <= std_logic_vector( unsigned(VA) + 1 );
 							if VA(2 downto 1) = "11" then
 								GS <= GS_STAMP_READ;
@@ -2195,7 +2180,7 @@ begin
 								GS <= GS_XY_READ;
 							end if;
 						end if;
-							
+
 					when GS_STAMP_READ =>
 						if STS = '0' then
 							STAMP_X := "00000000" & X(23 downto 15);
@@ -2216,16 +2201,16 @@ begin
 								STAMP_BASE := SMBA(17 downto 15) & "00000000" & "000000";
 							end if;
 						end if;
-						
+
 						STAMP_A := std_logic_vector( unsigned(STAMP_BASE) + unsigned(STAMP_Y) + unsigned(STAMP_X) );
-						
+
 						if CLK_12M_R = '1' then
 							GFX_ADDR <= STAMP_A;
 							GFX_SEL <= '1';
 							GFX_RMW <= '0';
 							GS <= GS_STAMP_WAIT;
 						end if;
-					
+
 					when GS_STAMP_WAIT =>
 						if GFX_SEL = '1' and WR_GFX_RUN = '1' then
 							GFX_SEL <= '0';
@@ -2233,7 +2218,7 @@ begin
 							GFX.SD <= GFX_WORDRAM_DO;
 							GS <= GS_DOT_READ;
 						end if;
-							
+
 					when GS_DOT_READ =>
 						case GFX.SD(15 downto 13) is
 							when "000" =>
@@ -2257,25 +2242,25 @@ begin
 							when "110" =>
 								PIX_X := 	 X(15 downto 11);
 								PIX_Y := not Y(15 downto 11);
-							when others => 
+							when others =>
 								PIX_X := 	 Y(15 downto 11);
 								PIX_Y := 	 X(15 downto 11);
 						end case;
 						GFX.NIB <= PIX_X(1 downto 0);
-						
+
 						if STS = '0' then
 							STAMP_DATA_ADDR := STAMP_N(10 downto 0) & PIX_X(3) & PIX_Y(3) & PIX_Y(2 downto 0) & PIX_X(2);
-						else 
+						else
 							STAMP_DATA_ADDR := STAMP_N(10 downto 2) & PIX_X(4 downto 3) & PIX_Y(4 downto 3) & PIX_Y(2 downto 0) & PIX_X(2);
 						end if;
-						
+
 						if CLK_12M_R = '1' then
 							GFX_ADDR <= STAMP_DATA_ADDR;
 							GFX_SEL <= '1';
 							GFX_RMW <= '0';
 							GS <= GS_DOT_WAIT;
 						end if;
-					
+
 					when GS_DOT_WAIT =>
 						if GFX_SEL = '1' and WR_GFX_RUN = '1' then
 							GFX_SEL <= '0';
@@ -2290,17 +2275,17 @@ begin
 									when others => COLOR := GFX_WORDRAM_DO(3 downto 0);
 								end case;
 							end if;
-							
+
 							case IMAGE_DOT(1 downto 0) is
 								when "00" => GFX_DO(15 downto 12) <= COLOR;
 								when "01" => GFX_DO(11 downto 8) <= COLOR;
 								when "10" => GFX_DO(7 downto 4) <= COLOR;
 								when others => GFX_DO(3 downto 0) <= COLOR;
 							end case;
-							
+
 							GFX.X <= std_logic_vector( unsigned(GFX.X) + unsigned(GFX.DX) );
 							GFX.Y <= std_logic_vector( unsigned(GFX.Y) + unsigned(GFX.DY) );
-							
+
 							IMAGE_DOT(1 downto 0) <= IMAGE_DOT(1 downto 0) + 1;
 							HDOTS <= std_logic_vector( unsigned(HDOTS) - 1 );
 							if HDOTS = "000000001" or IMAGE_DOT(1 downto 0) = "11" then
@@ -2309,15 +2294,15 @@ begin
 								GS <= GS_STAMP_READ;
 							end if;
 						end if;
-	
-					when GS_WRITE =>					
+
+					when GS_WRITE =>
 						if CLK_12M_R = '1' then
 							GFX_ADDR <= IMAGE_DATA_ADDR(18 downto 2);
 							GFX_SEL <= '1';
 							GFX_RMW <= '1';
 							GS <= GS_WRITE_WAIT;
 						end if;
-						
+
 					when GS_WRITE_WAIT =>
 						if GFX_SEL = '1' and WR_GFX_RUN = '1' then
 							GFX_SEL <= '0';
@@ -2327,7 +2312,7 @@ begin
 							if IMAGE_DOT(2) = '1' then
 								IMAGE_CELL <= IMAGE_CELL + unsigned(VCS) + 1;
 							end if;
-	
+
 							if HDOTS = "000000000" then
 								HDOTS <= HW;
 								IMAGE_DOT <= unsigned(DOT);
@@ -2342,23 +2327,23 @@ begin
 							else
 								GS <= GS_STAMP_READ;
 							end if;
-							
+
 							GFX_DO <= x"0000";
 						end if;
-								
+
 					when GS_END =>
 						if IEN(1) = '1' then
 							INT_PEND(1) <= '1';
 						end if;
 						GS <= GS_IDLE;
-					
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
 
-	
+
 	process( MODE, RET1, EXT_VA, WR0R, WR1R )
 	variable MWR_AS : std_logic_vector(16 downto 1);
 	variable MWR_AD : std_logic_vector(16 downto 1);
@@ -2372,10 +2357,10 @@ begin
 			else
 				MWR_AS := WR1R.A;
 			end if;
-				
-			if EXT_VA(17) = '0' then							--$200000-$21FFFF 1M WORD-RAM 0/1 
+
+			if EXT_VA(17) = '0' then							--$200000-$21FFFF 1M WORD-RAM 0/1
 				MWR_AD := MWR_AS;
-			else														--$220000-$23FFFF VRAM image 1M WORD-RAM 0/1 
+			else														--$220000-$23FFFF VRAM image 1M WORD-RAM 0/1
 				if EXT_VA(17 downto 16) = "10" then			--$200000-$20FFFF -> $220000-$22FFFF V32 cells
 					MWR_AD := "0" & MWR_AS(9 downto 5) & MWR_AS(4 downto 2) & MWR_AS(15 downto 10) & MWR_AS(1);
 				elsif EXT_VA(17 downto 15) = "110" then	--$210000-$217FFF -> $230000-$237FFF V16 cells
@@ -2388,7 +2373,7 @@ begin
 					MWR_AD := "1111" & MWR_AS(6 downto 5) & MWR_AS(4 downto 2) & MWR_AS(12 downto 7) & MWR_AS(1);
 				end if;
 			end if;
-			
+
 			if RET1 = '0' then
 				WORDRAM0_A <= MWR_AD;
 				WORDRAM1_A <= WR1R.A;
@@ -2398,18 +2383,18 @@ begin
 			end if;
 		end if;
 	end process;
-	
+
 	WORDRAM0_DO <= WORD_RAM_1M0_DO;
 	WORDRAM1_DO <= WORD_RAM_1M1_DO;
 	WORDRAM0_WR <= WORD_RAM_1M0_WR;
 	WORDRAM1_WR <= WORD_RAM_1M1_WR;
-	
-	
-	
+
+
+
 	--S68K PCM
 	S68K_PCM_SEL <= '1' when S68K_A(19 downto 15) = x"F" & "0" and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
 	DMA_PCM_SEL <= '1' when DD = "100" and DS = DS_WRITE else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -2447,27 +2432,27 @@ begin
 					S68K_PCM_DTACK_N <= '1';
 					PCM_RD_SEEN <= '0';
 				end if;
-				
+
 				case PCMA is
-					when PCMA_IDLE => 
+					when PCMA_IDLE =>
 						if DMA_PCM_SEL = '1' then
 							PCM_DMA_ADDR <= "1" & DMA_ADDR(12 downto 1);
 							PCM_DMA_DO <= DMA_DAT(7 downto 0);
 							PCM_DMA_RUN <= '1';
 							PCMA <= PCMA_DMA_HALT0;
 						end if;
-					
+
 					when PCMA_DMA_HALT0 =>
 						if S68K_AS_N = '1' and CLK_12M_R = '1' then
 							PCMA <= PCMA_DMA_HALT1;
 						end if;
-						
+
 					when PCMA_DMA_HALT1 =>
 						if S68K_AS_N = '0' and CLK_12M_R = '1' then
 							PCM_S68K_HALT <= '1';
 							PCMA <= PCMA_DMA_HALT2;
 						end if;
-						
+
 					when PCMA_DMA_HALT2 =>
 						if S68K_AS_N = '1' and CLK_12M_R = '1' then
 							PCM_HALT_WAIT <= PCM_HALT_WAIT + 1;
@@ -2478,7 +2463,7 @@ begin
 								PCMA <= PCMA_DMA_WRITE;
 							end if;
 						end if;
-					
+
 					when PCMA_DMA_WRITE =>
 						if CLK_12M_R = '1' then
 							PCM_HALT_WAIT <= PCM_HALT_WAIT + 1;
@@ -2487,31 +2472,31 @@ begin
 								PCMA <= PCMA_END;
 							end if;
 						end if;
-					
-					when PCMA_END => 
+
+					when PCMA_END =>
 						if PCM_DMA_RUN = '1' then
 							PCM_DMA_RUN <= '0';
 							PCM_DMA_WR <= '0';
 							PCMA <= PCMA_IDLE;
 						end if;
-						
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
+
 	PCM_A <= PCM_DMA_ADDR when PCMA = PCMA_DMA_WRITE else S68K_A(13 downto 1);
 	PCM_DI <= PCM_DMA_DO when PCMA = PCMA_DMA_WRITE else S68K_DI(7 downto 0);
 	PCM_WE_N <= not PCM_DMA_WR when PCMA = PCMA_DMA_WRITE else S68K_LDS_N or S68K_RNW;
-	PCM_N <= '0' when S68K_PCM_SEL = '1' else 
+	PCM_N <= '0' when S68K_PCM_SEL = '1' else
 				'0' when PCMA = PCMA_DMA_WRITE else
 				'1';
-	
-	
+
+
 	--S68K BRAM
 	S68K_BRAM_SEL <= '1' when S68K_A(19 downto 16) = x"E" and (S68K_LDS_N = '0' or S68K_UDS_N = '0') and S68K_AS_N = '0' else '0';
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -2527,8 +2512,8 @@ begin
 		end if;
 	end process;
 	BRAM_N <= '0' when S68K_BRAM_SEL = '1' else '1';
-	
-		
+
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -2538,22 +2523,22 @@ begin
 		elsif rising_edge(CLK) then
 			if EN = '1' then
 				case HS is
-					when HS_IDLE => 
+					when HS_IDLE =>
 						if PRG_RAM_RFS_SCHED = '1' and SBRQ = '0' and SRES = '1' then
 							HS <= HS_HALT0;
 						end if;
-					
+
 					when HS_HALT0 =>
 						if S68K_AS_N = '1' and CLK_12M_R = '1' then
 							HS <= HS_HALT1;
 						end if;
-						
+
 					when HS_HALT1 =>
 						if S68K_AS_N = '0' and CLK_12M_R = '1' then
 							S68K_HALT <= '1';
 							HS <= HS_HALT2;
 						end if;
-						
+
 					when HS_HALT2 =>
 						if S68K_AS_N = '1' and CLK_12M_R = '1' then
 							HALT_WAIT <= HALT_WAIT + 1;
@@ -2563,7 +2548,7 @@ begin
 								HS <= HS_EXEC;
 							end if;
 						end if;
-					
+
 					when HS_EXEC =>
 						if CLK_12M_R = '1' then
 							HALT_WAIT <= HALT_WAIT + 1;
@@ -2572,16 +2557,16 @@ begin
 								HS <= HS_END;
 							end if;
 						end if;
-					
-					when HS_END => 
+
+					when HS_END =>
 						HS <= HS_IDLE;
-						
+
 					when others => null;
 				end case;
 			end if;
 		end if;
 	end process;
-	
+
 	--S68K Interrupts
 	process( S68K_A, S68K_AS_N, S68K_FC, S68K_RNW, INT_PEND, IEN )
 	begin
@@ -2599,13 +2584,13 @@ begin
 			end case;
 			INT_VPA_N <= '0';
 		end if;
-		
+
 		if INT_PEND(6) = '1' and IEN(6) = '1' then
 			INT_IPL <= "110";
 		elsif INT_PEND(5) = '1' and IEN(5) = '1' then
 			INT_IPL <= "101";
 		elsif INT_PEND(4) = '1' and IEN(4) = '1' then
-			INT_IPL <= "100";	
+			INT_IPL <= "100";
 		elsif INT_PEND(3) = '1' and IEN(3) = '1' then
 			INT_IPL <= "011";
 		elsif INT_PEND(2) = '1' and IEN(2) = '1' then
@@ -2616,7 +2601,7 @@ begin
 			INT_IPL <= "000";
 		end if;
 	end process;
-	
+
 	--S68K MDR
 	process( RST_N, CLK )
 	begin
@@ -2636,7 +2621,7 @@ begin
 			end if;
 		end if;
 	end process;
-	
+
 	process( RST_N, CLK )
 	begin
 		if RST_N = '0' then
@@ -2647,7 +2632,7 @@ begin
 			end if;
 		end if;
 	end process;
-				  
+
 	S68K_CE_F <= CLK_12M_F;
 	S68K_CE_R <= CLK_12M_R;
 	S68K_CLK <= '1' when CLK_CNT = "11" or CLK_CNT = "00" else '0';
@@ -2660,12 +2645,12 @@ begin
 				  S68K_PRGRAM_DO when S68K_PRGRAM_DTACK_N = '0' else
 				  S68K_WORDRAM_DO when S68K_WORDRAM_DTACK_N = '0' else
 				  S68K_MDR;
-				  
+
 	BROM_N <= '0' when EXT_ROM_N = '0' and EXT_VA(17) = '0' and EXT_VA(16 downto 2) /= "0"&x"007"&"00" and EXT_ASEL_N = '0' else '1';
 	CDC_N <= '0' when S68K_A(19 downto 2) = x"F800" & "01" and S68K_LDS_N = '0' and S68K_AS_N = '0' else '1';
-	
+
 	CLWE_N <= S68K_LDS_N or S68K_RNW;
 	CUWE_N <= S68K_UDS_N or S68K_RNW;
 	COE_N <= (S68K_LDS_N and S68K_UDS_N) or not S68K_RNW;
-	
+
 end rtl;

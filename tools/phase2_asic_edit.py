@@ -10,6 +10,7 @@ Usage: phase2_asic_edit.py <core/rtl/MCD/ASIC.vhd>"""
 import sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8", errors="replace").read()
+s = "\n".join(l.rstrip() for l in s.replace("\r\n", "\n").split("\n"))  # normalise CRLF / trailing whitespace
 
 def rep(old, new):
     global s
