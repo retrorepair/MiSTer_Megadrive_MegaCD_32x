@@ -534,3 +534,39 @@ Phase 0 sanity: the pristine MegaCD build boots the (EU) BIOS on the MiSTer (`ph
 - Main/MGL facts: an MGL `type="f" index="0"` entry is routed to the disc-image slot (index 0 = "Insert Disk" here), so a
   BIOS cannot be chosen from an MGL; Main auto-loads `cifs/MegaCD/boot.rom` (EU on this MiSTer) and swaps in a `cd_bios.rom`
   found beside the disc. US BIOS copies placed beside Night Trap (cifs 32xcd dir) and 3 Ninjas (games/MegaCD/local).
+
+## 2026-09-09 late — where the 32X actually stands, and three self-inflicted traps
+
+**Working on hardware (build P2 / `phase0/MegaCD_P2.rbf`, deployed as `MegaCD_P2OLD.rbf`):**
+- MD cartridge through the 32X pass-through chain: Alien 3 plays.
+- Mega CD disc: boots (BIOS logo band still corrupt — deferred by the user).
+- **CD32X: Night Trap boots to the Mega CD licence screen** with the US BIOS beside the disc and the region forced to US.
+- **32X cartridges: Doom reaches its own region check** ("DEVELOPED FOR USE ONLY WITH NTSC..."), i.e. the cart is
+  mapped, the 32X registers answer and MD-side 32X code runs. With the region set to US it goes black — the SH-2
+  side is the open item.
+- Region: Main auto-loads `cifs/MegaCD/boot.rom` (EU) so the console comes up PAL and every 32X title refuses.
+  **F2 switches to US at run time** (`python3 /media/fat/uinput_kbd.py f2`), and a `cd_bios.rom` beside the disc
+  overrides per game. Copies placed beside Night Trap and 3 Ninjas.
+
+**Traps hit today (do not repeat):**
+1. `quartus_fit`/`quartus_sta` 17.0 **crash in `sta_find_duplicates_of_deleted_net_name` /
+   `add_keeper_to_vector_if_wildcard_matches`** when an SDC wildcard matches nodes that optimisation deleted. The
+   line-doubler Hq2x stand-in triggered it via `set_multicycle_path -to {*Hq2x*}` and kept crashing even after that
+   line was removed. Stock `sys/hq2x.sv` restored. Resource savings there need a different approach (the user runs
+   a CRT, so the whole scandoubler/Hq2x path is unused and could be cut at the `video_mixer` instantiation instead).
+2. A wedged `quartus_fit` looks exactly like a slow build. **Check CPU time, not wall clock** (0.7 CPU-min in 45
+   wall-min = dead). The build monitors now compare CPU time over 4 minutes and report "WEDGED".
+3. Three corruption fixes (`ba.sv` waiting for the Mega CD's DTACK on /FDC, per-port SDRAM `dout` registers, and
+   re-registering the cartridge SDRAM port in `clk_sys`) **killed the boot outright** — black screen, VDP left in
+   H32, i.e. the 68000 never ran. All three are reverted with a NOTE at each site; they belong to the deferred
+   corruption/timing pass, not to integration.
+
+**Diagnostics added (build P2g):**
+- `s32x_ddr` writes one telemetry beat to **DDR3 0x30200000** every ~1.2 ms: magic `5332`, a sequence counter, and
+  8-bit counters for SH-2 RAM reads/writes, frame-buffer draw writes and completed line prefetches. Read it live:
+  `python3 /media/fat/hpsmem.py read 30200000 8`. A frozen `seq` means the DDR3 write path is dead; moving SH-2
+  counters mean the SH-2s are executing. (`TELEMETRY` localparam in `rtl/s32x_ddr.sv` compiles it out.)
+- **SH-2 clock is now runtime-selectable** (OSD debug "SH2 Clock", status bit 2): 23.0 MHz (3 of 7 clocks, the real
+  rate) or srg320's CLK/2 = 26.8 MHz. Lets both be tested without a rebuild.
+- Live DDR3 sampling with the game running showed **no change at all** in the SH-2 work RAM or either frame buffer,
+  which is what the telemetry beat is there to explain (dead DDR3 path vs SH-2s never started).
