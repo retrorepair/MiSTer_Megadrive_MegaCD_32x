@@ -405,3 +405,25 @@ technique for live state when screenshots are not enough. Then release.
 parsed `entity.tsv`; the NukedMD-MegaCD `HANDOFF.md`/`STATS.md` hold the full bring-up history, the
 verificator verdict (11/12 NTSC; PAL's VAR/REG8030/IRQ09 are fixed-NTSC constants in the ROM) and the
 IRQ 0A root-cause analysis.*
+
+---
+
+# SESSION LOG — 2026-09-09 (Phase 0 in progress)
+
+## Done
+- Private repo created: github.com/retrorepair/MiSTer_Megadrive_MegaCD_32x (local `main`, identity retrorepair).
+- Vendored (git dirs stripped, `phase0/UPSTREAM_VERSIONS.txt`): `S32X_MiSTer_upstream/` (srg320 S32X_MiSTer dae3f17), `32X/` (srg320/32X), `SH/` (srg320/SH; `SH7604` = the SH-2), `phase0/MegaCD_ORIG/` (pristine srg320 MegaCD_MiSTer copy).
+- Tooling: `tools/build.sh` (detached Quartus 17.0 compile — the Bash tool kills anything after 10 min, even backgrounded), `tools/py.sh` (Python via WSL; no native Python here), `tools/parse_entity.py` (fit-report entity table → tree/TSV).
+- Both unmodified cores are being compiled for the per-entity resource tables (`phase0/build_*.log`).
+- `phase0/BANDWIDTH.md`: the SDRAM bandwidth model. Result: frame buffers on SDRAM = ~90 % (FAIL); frame buffers + SH-2 RAM on DDR3, MD/MCD on SDRAM = ~34 % SDRAM (PASS).
+
+## Findings that change the roadmap (answers to §9)
+1. **Q3 — the two fpgagen MDs are NOT the same revision.** S32X has a newer `rtl/GEN/gen.sv` (+`ba.sv` bus arbiter, `vdp.sv`/`vdp_pkg.sv`, `rtl/CART/cart.sv`); MegaCD_ORIG has the older `gen.sv` + `vdp.vhd`. gen.sv diff ≈ 2,000 lines. The **S32X gen is a superset**: it exposes the 32X-side signals (YS_N, EDCLK, CAS0_N, CAS2_N, LWR/UWR) *and* the expansion-port signals the MCD needs (ASEL_N, RAS2_N, ROM_N, FDC_N, CART_N, DISK_N, VCLK_CE). The old gen lacks YS_N/EDCLK/CAS0/CAS2. **Decision proposed: MD RTL = S32X's `rtl/GEN` + `rtl/CART`; top level + framework + MCD plumbing = MegaCD_ORIG's `MegaCD.sv`/`sys/` (the newer MiSTer framework: `emu_ports.vh`, `hps_io.sv`; S32X's `sys/` is the older one).** The 32X glue then stays exactly as srg320 validated it.
+2. **Q2 — where S32X keeps its memories:** BOTH 128 KB frame buffers are in M10K (`spram` ×4 in S32X.sv, ~205 blocks) and the SH-2 256 KB work RAM is in **DDR3** (`rtl/ddram.sv`, 16-byte line cache, 4 channels, one request port) with an OSD option for SDRAM. So the frame buffers must move; plan = DDR3 with a per-line burst prefetch into a 1-M10K line buffer (details in BANDWIDTH.md). The 32X VDP already separates display (`FB_DISP_*`) and draw (`FB_DRAW_*`) streams internally.
+3. **Q6 / boot precedence:** the 32X's 68K-side vector overlay is decoded on **/CE0** (`32X/IF.sv`: `CCE0_N = ... MD_BIOS_SEL | CE0_N`), and gen decodes /CE0 as $000000-3FFFFF only when CART_N=0. With no cart, $000000 → /ROM → MCD BIOS, the overlay lands harmlessly at $400000. So the "$000000 conflict" in §4.1 does not exist if **CART_N is driven from cart-present** (S32X hardwires `.CART_N(0)`; MegaCD_ORIG drives it from its CART module — keep the latter). 32X registers ($A15100) and the 32X ROM window ($880000) are address-decoded, so CD32X discs can enable the adapter (ADEN) without a cart, as on hardware. Main marks 32X ROMs via `ioctl_index[7:6]` (`s32x_rom`).
+4. **SH-2 clock:** S32X steps the SH-2s on `CE_R = clk_sys/2` = **26.85 MHz, 17 % faster than the real 23.01 MHz**. The exact 3-of-7 enable (53.69×3/7) is present but commented out in `32X/32X.sv`. For accuracy the 3/7 pattern should be restored (test for regressions — srg320 may have had a reason).
+5. **SH-2 cache:** 4-way, 64 sets × 16 B; data in 4 × (1024×8) M10K, tags 4 × (64×20) and LRU 2 × (64×6) which fit MLAB. ~4–10 M10K per CPU. The 2-way mode bit (CCR.TW) is implemented.
+6. **SH-2 MULT** does a signed and an unsigned 32×32 multiply side by side (DSP blocks; DSP is not a constraint).
+7. **Q5 (fpgagen refresh stall):** untested; Phase 1 item.
+8. **NukedMD-MegaCD MCD fixes are small, portable patches** (whitespace-ignored): `ASIC.vhd` 209 lines, `CDC.vhd` 153, `PCM.vhd` 52, `MCD.vhd` 92 (adds `pcm_mem.sv` PCM-RAM-in-SDRAM ports, `EN50` 50 MHz enable, and Nuked-sub-CPU-specific `MCLK`/`S68K_CLK` which are dropped if the sub-CPU stays fx68k). `MC68K.vhd` (226) is the Nuked wrapper — not ported unless the Nuked sub-CPU is chosen. Every fix is commented with the mcd-verificator test it satisfies.
+9. **SDRAM controller** (`sdram.sv`, both cores): 3 ports, single word per request, ~7 clocks each at 107.39 MHz.
