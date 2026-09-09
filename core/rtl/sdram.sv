@@ -49,7 +49,7 @@ module sdram
 	input             wrl0,
 	input             wrh0,
 	input      [15:0] din0,
-	output     [15:0] dout0,
+	output reg [15:0] dout0,
 	output            busy0,
 
 	input      [24:1] addr1,
@@ -57,7 +57,7 @@ module sdram
 	input             wrl1,
 	input             wrh1,
 	input      [15:0] din1,
-	output     [15:0] dout1,
+	output reg [15:0] dout1,
 	output            busy1,
 
 	input      [24:1] addr2,
@@ -65,7 +65,7 @@ module sdram
 	input             wrl2,
 	input             wrh2,
 	input      [15:0] din2,
-	output     [15:0] dout2,
+	output reg [15:0] dout2,
 	output            busy2,
 
 	input      [24:1] addr3,
@@ -73,7 +73,7 @@ module sdram
 	input             wrl3,
 	input             wrh3,
 	input      [15:0] din3,
-	output     [15:0] dout3,
+	output reg [15:0] dout3,
 	output            busy3,
 
 	input      [24:1] addr4,
@@ -81,7 +81,7 @@ module sdram
 	input             wrl4,
 	input             wrh4,
 	input      [15:0] din4,
-	output     [15:0] dout4,
+	output reg [15:0] dout4,
 	output            busy4
 );
 
@@ -116,13 +116,11 @@ reg  [4:0] ram_req = 0;
 wire [4:0] wr = {wrl4|wrh4,wrl3|wrh3,wrl2|wrh2,wrl1|wrh1,wrl0|wrh0};
 wire [4:0] rd = {rd4,rd3,rd2,rd1,rd0};
 
-reg [15:0] dout;
-
-assign dout0 = dout;
-assign dout1 = dout;
-assign dout2 = dout;
-assign dout3 = dout;
-assign dout4 = dout;
+// Read data is held PER PORT. Upstream kept one shared register, which was safe when only the
+// Mega CD and the MD used the controller: a consumer sampled its word as its own busy fell. With the
+// 32X added, the SH-2s and the MD hammer the cartridge port continuously, so a slower consumer (the
+// Mega CD sub-CPU's PRG-RAM fetch) had its word overwritten by another port's access before it read
+// it - corrupt BIOS graphics and a sub-CPU that never gets the disc loaded.
 
 localparam [9:0] RFS_CNT = 766;
 
@@ -202,7 +200,11 @@ always @(posedge clk) begin
 	end
 
 	if(state == STATE_READY && ram_req) begin
-		dout <= SDRAM_DQ;
+		if(ram_req[0]) dout0 <= SDRAM_DQ;
+		if(ram_req[1]) dout1 <= SDRAM_DQ;
+		if(ram_req[2]) dout2 <= SDRAM_DQ;
+		if(ram_req[3]) dout3 <= SDRAM_DQ;
+		if(ram_req[4]) dout4 <= SDRAM_DQ;
 		active <= 0;
 		ram_req <= 0;
 	end
