@@ -45,6 +45,7 @@ module gen
 	output        LDS_N,
 	output        UDS_N,
 	output        AS_N,
+	output        M68K_AS_O_N,	// 68000 /AS itself, for the expansion port (the Mega CD gate array)
 	input         DTACK_N,
 	output        ASEL_N,
 	output        VCLK_CE,
@@ -370,6 +371,7 @@ BA ba
 	.LDS_N(LDS_N),
 	.UDS_N(UDS_N),
 	.AS_N(AS_N),
+	.M68K_AS_O_N(M68K_AS_O_N),
 	.DTACK_N(DTACK_N & IO_DTACK_N & VDP_DTACK_N),
 	.ASEL_N(ASEL_N),
 	.VCLK_CE(VCLK_CE),

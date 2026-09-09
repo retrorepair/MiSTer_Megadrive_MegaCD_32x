@@ -11,6 +11,7 @@ module BA
 	output        LDS_N,
 	output        UDS_N,
 	output        AS_N,
+	output        M68K_AS_O_N,	// the 68000's own /AS (see below)
 	input         DTACK_N,
 	output        ASEL_N,
 	output        VCLK_CE,
@@ -554,6 +555,12 @@ module BA
 	assign LDS_N   = MBUS_LDS_N;
 	assign UDS_N   = MBUS_UDS_N;
 	assign AS_N    = MBUS_AS_N;
+	// The Mega CD gate array needs the 68000's OWN strobe, not the arbiter's: ASIC.vhd uses EXT_AS_N to
+	// pick between the fresh Word-RAM word and the previously latched one, so feeding it the arbiter
+	// flag (asserted for VDP-DMA and Z80 cycles too) shifts every DMAed word by one position - the
+	// corrupt logo band present since the first merge build. The 32X still takes AS_N above, because it
+	// must see VDP-DMA and Z80 cartridge cycles.
+	assign M68K_AS_O_N = M68K_AS_N;
 	assign ASEL_N  = MBUS_ASEL_N;										//000000-7FFFFF
 	assign IO_N    = ~IO_SEL;											//A10000-A1001F
 	assign TIME_N  = ~TIME_SEL;										//A13000-A130FF

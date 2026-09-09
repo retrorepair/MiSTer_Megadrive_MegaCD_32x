@@ -376,6 +376,7 @@ wire [23:1] GEN_VA;
 wire [15:0] GEN_VDI, GEN_VDO;
 wire        GEN_RNW, GEN_LDS_N, GEN_UDS_N;
 wire        GEN_AS_N, GEN_DTACK_N, GEN_ASEL_N;
+wire        GEN_M68K_AS_N;	// the 68000's own /AS: the Mega CD gate array selects Word-RAM data with it
 wire        GEN_RAS2_N;
 wire        EXT_ROM_N;
 wire        EXT_FDC_N;
@@ -427,6 +428,7 @@ gen gen
 	.LDS_N(GEN_LDS_N),
 	.UDS_N(GEN_UDS_N),
 	.AS_N(GEN_AS_N),
+	.M68K_AS_O_N(GEN_M68K_AS_N),
 	.DTACK_N(GEN_DTACK_N),
 	.ASEL_N(GEN_ASEL_N),
 	.VCLK_CE(GEN_VCLK_CE),
@@ -590,7 +592,7 @@ MCD MCD
 	.EXT_VA(GEN_VA[17:1]),
 	.EXT_VDI(GEN_VDO),
 	.EXT_VDO(MCD_DO),
-	.EXT_AS_N(GEN_AS_N),
+	.EXT_AS_N(GEN_M68K_AS_N),
 	.EXT_RNW(GEN_RNW),
 	.EXT_LDS_N(GEN_LDS_N),
 	.EXT_UDS_N(GEN_UDS_N),

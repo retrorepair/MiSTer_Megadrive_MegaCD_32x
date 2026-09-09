@@ -16,5 +16,5 @@ set_multicycle_path -from [get_clocks { *|pll|pll_inst|altera_pll_i|*[0].*|divcl
 # failed by up to 8 ns through the cartridge/32X muxes. The transfer is protocol-bounded, not
 # single-cycle: sdram.sv now holds each port's busy for two extra clk_ram cycles after capturing the
 # data, so nothing samples it for at least ~19 ns. Allow four cycles to match that guarantee.
-set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -setup 4
-set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -hold 3
+set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -setup 3
+set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -hold 2

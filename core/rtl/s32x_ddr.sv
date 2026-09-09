@@ -156,7 +156,13 @@ reg  [17:1] sdr_a_q;
 reg  [15:0] sdr_d_q;
 reg   [1:0] sdr_be_q;
 assign sdr_busy = sdr_rd_pend | sdr_wr_pend;
-assign sdr_dout = pick16(sdr_cache_d, sdr_a_q[3:1]);
+// Index the line with the LIVE address while a read is asserted. sdr_a_q is only loaded on the rising
+// edge of sdr_rd, which is one clk_sys too late for the second and later beats of an SH-2 cache-line
+// burst: the BSC re-drives the address and RD_N on its CE_R half and latches the data on the very next
+// CE_F half without re-checking WAIT_N, so the mux was still showing the previous beat's word and the
+// line filled as w0,w0,w1,w2,... Upstream's ddram.sv escapes this only by running on clk_ram (twice
+// this clock), where the registered index settles inside the same bus cycle.
+assign sdr_dout = pick16(sdr_cache_d, sdr_rd ? sdr_addr[3:1] : sdr_a_q[3:1]);
 
 // draw read: one 16-byte cache line, tagged with {buffer, word address}
 // fbd_addr is a WORD index (0..65535 = 128 KB), unlike sdr_addr which is a byte address with bit 0
