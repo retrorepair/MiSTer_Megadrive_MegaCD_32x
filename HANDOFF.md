@@ -610,3 +610,44 @@ as a root cause - it is not.
 **Also learnt:** the SH-2 PC probe, the per-port read registers and the SH-2 clock default flip all
 correlate with dead builds and were dropped; re-add them one at a time, if at all. Routing two 32-bit PCs
 across a 77%-full device is the most likely reason.
+
+## 2026-09-10 ~00:30 — REQUIREMENT MET: build P3b plays every tier
+
+`releases/MegaCD_32X_P3b_32x_cd_cd32x_working.rbf` (source = commit 763031b). Verified on the DE10-Nano,
+screenshots in `core/shots/v_*.png`:
+
+| Tier | Title | Result |
+|---|---|---|
+| MD cartridge | Alien 3 | plays |
+| Mega CD disc | 3 Ninjas Kick Back | **plays** (first disc ever to boot on this core) |
+| 32X cartridge | Doom | title screen, menu rendering |
+| 32X cartridge | Virtua Racing Deluxe | 3D attract mode |
+| 32X cartridge | Knuckles Chaotix | title/level screen |
+| **CD32X** | Night Trap | **live full-motion video through the 32X frame buffer** |
+
+Night Trap showing FMV is the acceptance test from the original roadmap §6 Phase 4: the Mega CD streams
+sectors into Word RAM, the 68000 hands them over, the SH-2s blit into the 32X frame buffer in DDR3, and the
+32X VDP composites over the MD picture. All three units are working together.
+
+Fit: 32,194 ALMs (77 %), 4,130,382 memory bits (73 %). Timing not yet clean (see below).
+
+### How to run it
+- Deploy with `tools/deploy.sh <rbf> <name-on-mister.rbf>`; test MGLs are in `tools/mgl/` (rbf prefix must
+  match the deployed name).
+- **Region matters:** Main auto-loads `cifs/MegaCD/boot.rom`, which is EU here, so the console comes up PAL
+  and every 32X title refuses to run ("DEVELOPED FOR USE ONLY WITH NTSC..."). Press F2 for US
+  (`python3 /media/fat/uinform_kbd.py f2` — actually `uinput_kbd.py`), or put a US `cd_bios.rom` beside the
+  disc. Copies are already beside Night Trap and 3 Ninjas.
+- Don't press F2 mid-boot and screenshot immediately: a region change resets the core, which is what made an
+  earlier Alien 3 screenshot look like a regression.
+
+### Still open
+- **Timing is not clean**: clk_sys -3.26 ns (TNS -3.5) and clk_ram -1.15 ns (TNS -30.9). It runs, but this
+  is the same class of risk that produced the earlier build lottery. Worst paths are in `core/sta_p3b.log`.
+- **BIOS with no disc** shows a black screen (with a disc it boots fine). Low priority but unexplained.
+- Audio has not been checked at all on any tier.
+- No long soak yet; the earlier NukedMD project found a crash only after hours.
+- Deferred by choice: the SH-2 PC probe, per-port SDRAM read registers and the exact 23.011 MHz SH-2 clock
+  (currently srg320's CLK/2 by default, exact rate on OSD debug bit 2) all correlate with dead builds.
+- Not yet done from the roadmap: 32X reset topology (VRES/MRES tied inactive), Hq2x/scandoubler removal for
+  resources (the user runs a CRT, so that whole path is dead weight), Main-side 32X ROM naming.
