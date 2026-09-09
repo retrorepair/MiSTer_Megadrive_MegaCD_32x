@@ -112,6 +112,16 @@ reg  [1:0] ba = 0;
 reg  [1:0] dqm;
 reg        active = 0;
 reg  [4:0] ram_req = 0;
+// Busy is held for two extra clk_ram cycles after the data is captured. The consumers live in the
+// clk_sys domain (half this clock) and sample a port's data on the SAME edge at which they first see
+// that port's busy drop - the 32X's IF samples CDI_SYNC and ROM_WAIT_SYNC on one negedge, and the MD
+// and Mega CD do the equivalent. That gave the combinational path from this register, through the
+// cartridge/32X muxes, only about one clk_ram period to settle: the fitter reported it at -8 ns and it
+// worked or failed depending on placement, which corrupted ROM fetches for the 68000, the SH-2s and the
+// Mega CD sub-CPU. Holding busy longer gives the data a guaranteed ~19 ns before anything samples it
+// (see the matching multicycle exception in MegaCD.sdc). Costs two clk_ram cycles of latency per access.
+reg  [4:0] ram_req_d = 0;
+reg  [4:0] ram_req_d2 = 0;
 
 wire [4:0] wr = {wrl4|wrh4,wrl3|wrh3,wrl2|wrh2,wrl1|wrh1,wrl0|wrh0};
 wire [4:0] rd = {rd4,rd3,rd2,rd1,rd0};
@@ -199,6 +209,9 @@ always @(posedge clk) begin
 		end
 	end
 
+	ram_req_d  <= ram_req;
+	ram_req_d2 <= ram_req_d;
+
 	if(state == STATE_READY && ram_req) begin
 		if(ram_req[0]) dout0 <= SDRAM_DQ;
 		if(ram_req[1]) dout1 <= SDRAM_DQ;
@@ -215,11 +228,11 @@ always @(posedge clk) begin
 	end
 end
 
-assign busy0 = ram_req[0];
-assign busy1 = ram_req[1];
-assign busy2 = ram_req[2];
-assign busy3 = ram_req[3];
-assign busy4 = ram_req[4];
+assign busy0 = ram_req[0] | ram_req_d[0] | ram_req_d2[0];
+assign busy1 = ram_req[1] | ram_req_d[1] | ram_req_d2[1];
+assign busy2 = ram_req[2] | ram_req_d[2] | ram_req_d2[2];
+assign busy3 = ram_req[3] | ram_req_d[3] | ram_req_d2[3];
+assign busy4 = ram_req[4] | ram_req_d[4] | ram_req_d2[4];
 
 
 localparam MODE_NORMAL = 2'b00;
