@@ -651,3 +651,23 @@ Fit: 32,194 ALMs (77 %), 4,130,382 memory bits (73 %). Timing not yet clean (see
   (currently srg320's CLK/2 by default, exact rate on OSD debug bit 2) all correlate with dead builds.
 - Not yet done from the roadmap: 32X reset topology (VRES/MRES tied inactive), Hq2x/scandoubler removal for
   resources (the user runs a CRT, so that whole path is dead weight), Main-side 32X ROM naming.
+
+### Breadth check on P3b (no rebuild, screenshots `core/shots/w_*.png`)
+All of these ran on the first attempt, region forced to US where needed:
+
+| Tier | Title | Result |
+|---|---|---|
+| 32X | Doom | title/menu |
+| 32X | Virtua Racing Deluxe | 3D attract |
+| 32X | Knuckles Chaotix | title/level |
+| 32X | After Burner Complete | in-game 3D |
+| 32X | Space Harrier | attract, sprites |
+| 32X | Star Wars Arcade | logo/starfield intro |
+| Mega CD | 3 Ninjas Kick Back | gameplay |
+| Mega CD | AH-3 Thunderstrike | title |
+| Mega CD | Adventures of Batman & Robin | title |
+| CD32X | Night Trap | live FMV |
+| MD cart | Alien 3 | gameplay |
+
+Six of six 32X titles, three of three Mega CD discs, the CD32X title and the MD cartridge. No title tested
+so far fails to get past its title screen.
