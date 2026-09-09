@@ -479,3 +479,39 @@ scripted MCD.vhd edit; the diff from upstream is therefore reproducible. Changes
   line-buffer stand-in with the same `Hq2x` interface), video_freak, lightgun, Pier EEPROM.
 - Test MGLs in `tools/mgl/` (rbf prefix `_Console/MegaCD_P1_20260909`); deploy with `tools/deploy.sh`.
 Phase 0 sanity: the pristine MegaCD build boots the (EU) BIOS on the MiSTer (`phase0/shots/p0orig_boot.png`); timing met.
+
+## Phase 1 hardware results (2026-09-09, builds P1 / P1b)
+- P1 fit: 22,594 ALMs (54 %), 522 M10K (94 %), timing met. MCD block 4,882 ALMs / 285 M10K (PCM RAM now in SDRAM), S32X-revision gen 7,053 / 154.
+- First P1 build: BIOS screen with a corrupt logo band, cartridge ignored, disc not booting. Two causes found:
+  1. The retrorepair Main sends "Insert Cartridge" as ioctl index 6; the pristine top expects bit 6 (0x40). Ported the
+     NukedMD core's decode + OSD media entries (`tools/phase1_top_edit2.py`); the debug-menu status bits moved 36-39 → 59-62
+     because Main reads [36] as "Disc Insert: Keep Running". **Cartridge now boots (Alien 3 plays) on P1b.**
+  2. New gen's bus arbiter ends a 000000-7FFFFF read on `MEM_RDY || !DTACK_N`; feeding MEM_RDY from the SDRAM idle flag let it
+     finish before the Mega CD / cart module answered. MEM_RDY is tied low; everything on that range answers with DTACK.
+- Still corrupt on P1b: the BIOS logo band (graphics the sub-CPU decompresses into Word RAM) and the disc does not boot.
+  Hypothesis: the NukedMD ASIC's early PRG-RAM read acknowledge / posted writes are tuned to the Nuked 68000's latch timing;
+  fx68k latches on its own enable and can read before the SDRAM data is back. `tools/phase2_asic_edit.py` restores upstream's
+  acknowledge timing for the sub-CPU while keeping the other verificator fixes. Being tested in the Phase 2 build.
+- Screenshots: `core/shots/p1c_*.png` (BIOS corrupt band, Alien 3 in game, BIOS instead of the CD game).
+
+## Phase 2 (2026-09-09) — 32X in the slot, source complete, first build running
+- `core/rtl/S32X/` (srg320 32X, edited by `tools/phase2_32x_edit.py` + `tools/phase2_vdp_edit.py`), `core/rtl/SH/` (SH7604 +
+  core), `core/rtl/CART/` (S32X's cart.sv: works from the 32X's pass-through strobes, unlike the VHDL CART), `core/rtl/s32x_ddr.sv`.
+- Chain: gen → S32X block (cart bus) → cart.sv → SDRAM port 0. Mega CD on the expansion port as before. SDRAM ports:
+  0 cartridge (MD or SH-2 through the 32X), 1 MCD BIOS, 2 PRG-RAM, 3 PCM RAM, 4 load/save.
+- Frame buffers + SH-2 work RAM in DDR3 (`s32x_ddr.sv`): per-line burst prefetch into a 1-M10K line buffer at H_CNT 0x1D0
+  (LP_REQ), draw port with 8-entry write FIFO (busy at 6) and 16-byte read cache, SH-2 RAM channel as ddram.sv. Accepted
+  deviation documented in the file header (line read ~10 µs early).
+- 32X interface changes (faithful): (a) vector-ROM overlay gated on /CE0 (CD32X boot with an empty slot); (b) every MD
+  /CE0 pass-through cycle runs through the ROM state machine and gets /DTACK from the 32X (as the real 32X drives the
+  slot's /DTACK), arbitrated against SH-2 ROM fetches; a `CART_EXT` input from cart.sv says whether the cycle touches
+  memory (else it completes at once); (c) SH-2 clock enable at the exact 23.011 MHz (3-of-7), parameter SH2_EXACT.
+- Video: 32X pixel replaces the MD pixel where YSO_N is low (debug bit 63 disables). Audio: PWM (+ CD when "Filtered")
+  on gen's EXT channel with saturation; CD unfiltered mixes after the LPF as before.
+- Top edits: `tools/phase2_top_edit.py` (mapper/Pier logic in the top replaced by cart.sv + S32X's header-quirk block;
+  old DDR3 PRG-RAM option removed). SDC: false paths for the SDRAM→32X negedge samplers (upstream's only timing failures).
+- Test media: Night Trap 32X (Disc 1) bin/cue at `/media/fat/cifs/MegaCD/rr-sega-mega-cd/bin/32xcd/` (MGL
+  `tools/mgl/MegaCD_P2_nighttrap.mgl`, US BIOS + disc). No 32X cartridge ROMs on the MiSTer yet (`games/S32X` empty).
+- Not yet done: reset topology for the 32X (VRES/MRES tied inactive, block reset with the console as srg320 does), Hq2x strip,
+  68K work RAM to SDRAM if M10K is short, Backup-RAM-cartridge model (was in CART.vhd; the "Internal+Cart" option now only
+  covers the game cart's SRAM), Main support for 32X ROM naming.
