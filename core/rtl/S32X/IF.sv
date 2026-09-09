@@ -75,8 +75,7 @@ module S32X_IF
 	output     [15:0] PWM_R,
 
 	input             ROM_WAIT,
-	input             CART_EXT,
-	output      [7:0] DBG_STATE,		// the cartridge is fetching/storing for the current pass-through cycle (ROM_WAIT will rise)
+	input             CART_EXT,		// the cartridge is fetching/storing for the current pass-through cycle (ROM_WAIT will rise)
 
 	output     [23:0] DBG_VA,
 	output      [7:0] ROM_WAIT_CNT,
@@ -1063,7 +1062,6 @@ module S32X_IF
 	assign CCAS2_N = CAS2_N_SYNC;
 
 	assign SEL = SH_ROM_GRANT;
-	assign DBG_STATE = {ADCR.ADEN, ADCR.RES, DCR.RV, SH_ROM_GRANT, ROM_ST[2:0], CART_EXT};
 
 	assign DBG_VA = {VA_SYNC,1'b0};
 

@@ -49,7 +49,7 @@ module sdram
 	input             wrl0,
 	input             wrh0,
 	input      [15:0] din0,
-	output reg [15:0] dout0,
+	output     [15:0] dout0,
 	output            busy0,
 
 	input      [24:1] addr1,
@@ -57,7 +57,7 @@ module sdram
 	input             wrl1,
 	input             wrh1,
 	input      [15:0] din1,
-	output reg [15:0] dout1,
+	output     [15:0] dout1,
 	output            busy1,
 
 	input      [24:1] addr2,
@@ -65,7 +65,7 @@ module sdram
 	input             wrl2,
 	input             wrh2,
 	input      [15:0] din2,
-	output reg [15:0] dout2,
+	output     [15:0] dout2,
 	output            busy2,
 
 	input      [24:1] addr3,
@@ -73,7 +73,7 @@ module sdram
 	input             wrl3,
 	input             wrh3,
 	input      [15:0] din3,
-	output reg [15:0] dout3,
+	output     [15:0] dout3,
 	output            busy3,
 
 	input      [24:1] addr4,
@@ -81,7 +81,7 @@ module sdram
 	input             wrl4,
 	input             wrh4,
 	input      [15:0] din4,
-	output reg [15:0] dout4,
+	output     [15:0] dout4,
 	output            busy4
 );
 
@@ -112,25 +112,26 @@ reg  [1:0] ba = 0;
 reg  [1:0] dqm;
 reg        active = 0;
 reg  [4:0] ram_req = 0;
-// Busy is held for two extra clk_ram cycles after the data is captured. The consumers live in the
-// clk_sys domain (half this clock) and sample a port's data on the SAME edge at which they first see
-// that port's busy drop - the 32X's IF samples CDI_SYNC and ROM_WAIT_SYNC on one negedge, and the MD
-// and Mega CD do the equivalent. That gave the combinational path from this register, through the
-// cartridge/32X muxes, only about one clk_ram period to settle: the fitter reported it at -8 ns and it
-// worked or failed depending on placement, which corrupted ROM fetches for the 68000, the SH-2s and the
-// Mega CD sub-CPU. Holding busy longer gives the data a guaranteed ~19 ns before anything samples it
-// (see the matching multicycle exception in MegaCD.sdc). Costs two clk_ram cycles of latency per access.
+// Busy is held two extra clk_ram cycles after the data is captured. The consumers run on clk_sys (half
+// this clock) and sample a port's data on the SAME edge at which they first see that port's busy drop -
+// the 32X's IF takes CDI_SYNC and ROM_WAIT_SYNC on one negedge, the MD and Mega CD do the equivalent.
+// That left the combinational path from this register, through the cartridge and 32X muxes, about one
+// clk_ram period to settle; the fitter reported it at -8 ns and whether it worked came down to
+// placement, corrupting ROM fetches for the 68000, the SH-2s and the Mega CD sub-CPU. Two extra cycles
+// give the data ~19 ns before anything samples it (see the matching multicycle in MegaCD.sdc).
 reg  [4:0] ram_req_d = 0;
 reg  [4:0] ram_req_d2 = 0;
 
 wire [4:0] wr = {wrl4|wrh4,wrl3|wrh3,wrl2|wrh2,wrl1|wrh1,wrl0|wrh0};
 wire [4:0] rd = {rd4,rd3,rd2,rd1,rd0};
 
-// Read data is held PER PORT. Upstream kept one shared register, which was safe when only the
-// Mega CD and the MD used the controller: a consumer sampled its word as its own busy fell. With the
-// 32X added, the SH-2s and the MD hammer the cartridge port continuously, so a slower consumer (the
-// Mega CD sub-CPU's PRG-RAM fetch) had its word overwritten by another port's access before it read
-// it - corrupt BIOS graphics and a sub-CPU that never gets the disc loaded.
+reg [15:0] dout;
+
+assign dout0 = dout;
+assign dout1 = dout;
+assign dout2 = dout;
+assign dout3 = dout;
+assign dout4 = dout;
 
 localparam [9:0] RFS_CNT = 766;
 
@@ -213,11 +214,7 @@ always @(posedge clk) begin
 	ram_req_d2 <= ram_req_d;
 
 	if(state == STATE_READY && ram_req) begin
-		if(ram_req[0]) dout0 <= SDRAM_DQ;
-		if(ram_req[1]) dout1 <= SDRAM_DQ;
-		if(ram_req[2]) dout2 <= SDRAM_DQ;
-		if(ram_req[3]) dout3 <= SDRAM_DQ;
-		if(ram_req[4]) dout4 <= SDRAM_DQ;
+		dout <= SDRAM_DQ;
 		active <= 0;
 		ram_req <= 0;
 	end

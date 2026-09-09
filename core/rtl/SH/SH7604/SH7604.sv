@@ -4,12 +4,12 @@ module SH7604 (
 	input             CE_R,
 	input             CE_F,
 	input             EN,
-
+	
 	input             RES_N,
 	input             NMI_N,
-
+	
 	input       [3:0] IRL_N,
-
+	
 	output     [26:0] A,
 	input      [31:0] DI,
 	output     [31:0] DO,
@@ -24,7 +24,7 @@ module SH7604 (
 	output      [3:0] WE_N,		//CASxx_N/DQMxx
 	output            RD_N,
 	output            IVECF_N,
-
+	
 	input      [26:0] EA,
 	output     [31:0] EDI,
 	input      [31:0] EDO,
@@ -39,31 +39,30 @@ module SH7604 (
 	input       [3:0] EWE_N,		//CASxx_N/DQMxx
 	input             ERD_N,
 	input             EIVECF_N,
-
+	
 	input             WAIT_N,
 	input             BRLS_N,	//BACK_N
 	output            BGR_N,	//BREQ_N
-
+	
 	input             DREQ0,
 	output            DACK0,
 	input             DREQ1,
 	output            DACK1,
-
+	
 	output            FTOA,
 	output            FTOB,
 	input             FTCI,
 	input             FTI,
-
+	
 	input             RXD,
 	output            TXD,
 	output            SCKO,
 	input             SCKI,
-
+	
 	output            WDTOVF_N,
-
-	input       [5:0] MD,
-	output     [31:0] DBG_PC
-
+	
+	input       [5:0] MD
+	
 `ifdef DEBUG
 	                  ,
 	input       [4:0] DBG_REGN,
@@ -73,7 +72,7 @@ module SH7604 (
 `endif
 );
 	import SH7604_PKG::*;
-
+	
 	bit [31:0] CBUS_A;
 	bit [31:0] CBUS_DO;
 	bit [31:0] CBUS_DI;
@@ -81,7 +80,7 @@ module SH7604 (
 	bit  [3:0] CBUS_BA;
 	bit        CBUS_REQ;
 	bit        CBUS_TAS;
-
+	
 	bit [31:0] IBUS_A;
 	bit [31:0] IBUS_DO;
 	bit [31:0] IBUS_DI;
@@ -91,7 +90,7 @@ module SH7604 (
 	bit        IBUS_WAIT;
 	bit        IBUS_BURST;
 	bit        IBUS_LOCK;
-
+	
 	bit  [3:0] INT_LVL;
 	bit  [7:0] INT_VEC;
 	bit        INT_REQ;
@@ -100,25 +99,25 @@ module SH7604 (
 	bit        INT_ACP;
 	bit        VECT_REQ;
 	bit        VECT_WAIT;
-
+	
 	bit        SLEEP;
-
+	
 	bit  [3:0] VBUS_A;
 	bit  [7:0] VBUS_DO;
 	bit        VBUS_REQ;
 	bit        VBUS_BUSY;
-
+	
 	//CACHE
 	bit [31:0] CACHE_DI;
 	bit [31:0] CACHE_DO;
 	bit        CACHE_BUSY;
 	bit        CACHE_ACT;
-
+	
 	//BSC
 	bit [31:0] BSC_DO;
 	bit        BSC_BUSY;
 	bit        BSC_ACK;
-
+	
 	//DMAC
 	bit [31:0] DMAC_DO;
 	bit        DMAC_ACT;
@@ -127,19 +126,19 @@ module SH7604 (
 	bit  [7:0] DMAC0_VEC;
 	bit        DMAC1_IRQ;
 	bit  [7:0] DMAC1_VEC;
-
+	
 	//INTC
 	bit [31:0] INTC_DO;
 	bit        INTC_ACT;
 	bit        INTC_BUSY;
-
+	
 	//MULT
 	bit  [1:0] MAC_SEL;
 	bit  [3:0] MAC_OP;
 	bit        MAC_S;
 	bit        MAC_WE;
 	bit [31:0] MULT_DO;
-
+	
 	//SCI
 	bit [31:0] SCI_DO;
 	bit        SCI_ACT;
@@ -147,7 +146,7 @@ module SH7604 (
 	bit        TXI_IRQ;
 	bit        RXI_IRQ;
 	bit        ERI_IRQ;
-
+	
 	//FRT
 	bit [31:0] FRT_DO;
 	bit        FRT_ACT;
@@ -155,7 +154,7 @@ module SH7604 (
 	bit        OCIA_IRQ;
 	bit        OCIB_IRQ;
 	bit        OVI_IRQ;
-
+	
 	//WDT
 	bit [31:0] WDT_DO;
 	bit        WDT_ACT;
@@ -169,19 +168,19 @@ module SH7604 (
 	bit        DIVU_ACT;
 	bit        DIVU_IRQ;
 	bit  [7:0] DIVU_VEC;
-
+	
 	//UBC
 	bit [31:0] UBC_DO;
 	bit        UBC_ACT;
 	bit        UBC_IRQ;
-
+	
 	//MSBY
 	bit [31:0] MSBY_DO;
 	bit        MSBY_ACT;
 	bit        MSBY_SBY;
-
+	
 	bit        SBY;
-
+	
 	//Internal clocks
 	bit        CLK4_CE;
 	bit        CLK8_CE;
@@ -195,29 +194,29 @@ module SH7604 (
 	//bit        CLK2048_CE;
 	bit        CLK4096_CE;
 	bit        CLK8192_CE;
-
+	
 	bit        RES_SYNC_N;
 	always @(posedge CLK or negedge RST_N) begin
 		if (!RST_N) begin
 			RES_SYNC_N <= 0;
 		end
-		else begin
+		else begin	
 			if (CE_R) begin
 				RES_SYNC_N <= RES_N;
 			end
 		end
 	end
-
+	
 	SH_core core
 	(
 		.CLK(CLK),
 		.RST_N(RST_N),
 		.CE(CE_R),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
 		.NMI_N(NMI_N),
-
+		
 		.BUS_A(CBUS_A),
 		.BUS_DI(CBUS_DI),
 		.BUS_DO(CBUS_DO),
@@ -226,12 +225,12 @@ module SH7604 (
 		.BUS_REQ(CBUS_REQ),
 		.BUS_TAS(CBUS_TAS),
 		.BUS_WAIT(CACHE_BUSY),
-
+		
 		.MAC_SEL(MAC_SEL),
 		.MAC_OP(MAC_OP),
 		.MAC_S(MAC_S),
 		.MAC_WE(MAC_WE),
-
+		
 		.INT_LVL(INT_LVL),
 		.INT_VEC(INT_VEC),
 		.INT_REQ(INT_REQ),
@@ -240,9 +239,8 @@ module SH7604 (
 		.INT_ACP(INT_ACP),
 		.VECT_REQ(VECT_REQ),
 		.VECT_WAIT(VECT_WAIT),
-
-		.SLEEP(SLEEP),
-		.DBG_PC(DBG_PC)
+		
+		.SLEEP(SLEEP)
 `ifdef DEBUG
 		,
 		.DBG_REGN(DBG_REGN),
@@ -251,9 +249,9 @@ module SH7604 (
 		.DBG_BREAK(DBG_BREAK)
 `endif
 	);
-
+	
 	assign CBUS_DI = |MAC_SEL && MAC_OP == 4'b1100 && !MAC_WE ? MULT_DO : CACHE_DO;
-
+	
 	wire [31:0] MULT_DI = |MAC_SEL && MAC_OP[3:2] == 2'b10 ? CACHE_DO : CBUS_DO;
 	SH7604_MULT mult
 	(
@@ -262,9 +260,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.CBUS_A(CBUS_A),
 		.CBUS_DI(MULT_DI),
 		.CBUS_DO(MULT_DO),
@@ -272,7 +270,7 @@ module SH7604 (
 		.CBUS_BA(CBUS_BA),
 		.CBUS_REQ(CBUS_REQ),
 		.CBUS_BUSY(),
-
+		
 		.MAC_SEL(MAC_SEL),
 		.MAC_OP(MAC_OP),
 		.MAC_S(MAC_S),
@@ -287,9 +285,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.CBUS_A(CBUS_A),
 		.CBUS_DI(CACHE_DI),
 		.CBUS_DO(CACHE_DO),
@@ -298,7 +296,7 @@ module SH7604 (
 		.CBUS_REQ(CBUS_REQ),
 		.CBUS_TAS(CBUS_TAS),
 		.CBUS_BUSY(CACHE_BUSY),
-
+		
 		.IBUS_A(IBUS_A),
 		.IBUS_DI(IBUS_DI),
 		.IBUS_DO(IBUS_DO),
@@ -309,20 +307,20 @@ module SH7604 (
 		.IBUS_LOCK(IBUS_LOCK),
 		.IBUS_WAIT(IBUS_WAIT)
 	);
-
-	assign IBUS_DI = INTC_ACT ? INTC_DO :
-						  FRT_ACT  ? FRT_DO :
-						  WDT_ACT  ? WDT_DO :
-						  SCI_ACT  ? SCI_DO :
-						  DIVU_ACT ? DIVU_DO :
-						  UBC_ACT  ? UBC_DO :
-						  DMAC_ACT ? DMAC_DO :
+	
+	assign IBUS_DI = INTC_ACT ? INTC_DO : 
+						  FRT_ACT  ? FRT_DO : 
+						  WDT_ACT  ? WDT_DO : 
+						  SCI_ACT  ? SCI_DO : 
+						  DIVU_ACT ? DIVU_DO : 
+						  UBC_ACT  ? UBC_DO : 
+						  DMAC_ACT ? DMAC_DO : 
 						             BSC_DO;
 	assign IBUS_WAIT = INTC_ACT ? INTC_BUSY :
-	                   DIVU_ACT ? DIVU_BUSY :
+	                   DIVU_ACT ? DIVU_BUSY : 
 	                              DMAC_BUSY;
 
-
+	
 	SH7604_UBC UBC
 	(
 		.CLK(CLK),
@@ -330,9 +328,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.IBUS_A(IBUS_A),
 		.IBUS_DI(IBUS_DO),
 		.IBUS_DO(UBC_DO),
@@ -341,10 +339,10 @@ module SH7604 (
 		.IBUS_REQ(IBUS_REQ),
 		.IBUS_BUSY(),
 		.IBUS_ACT(UBC_ACT),
-
+		
 		.IRQ(UBC_IRQ)
 	);
-
+	
 	bit  [31:0] DBUS_A;
 	bit  [31:0] DBUS_DO;
 	bit   [3:0] DBUS_BA;
@@ -359,18 +357,18 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
 		.NMI_N(NMI_N),
-
+		
 		.DREQ0(DREQ0),
 		.DACK0(DACK0),
 		.DREQ1(DREQ1),
 		.DACK1(DACK1),
-
+		
 		.RXI_IRQ(1'b0),
 		.TXI_IRQ(1'b0),
-
+		
 		.IBUS_A(IBUS_A),
 		.IBUS_DI(IBUS_DO),
 		.IBUS_DO(DMAC_DO),
@@ -381,7 +379,7 @@ module SH7604 (
 		.IBUS_LOCK(IBUS_LOCK),
 		.IBUS_BUSY(DMAC_BUSY),
 		.IBUS_ACT(DMAC_ACT),
-
+		
 		.DBUS_A(DBUS_A),
 		.DBUS_DI(BSC_DO),
 		.DBUS_DO(DBUS_DO),
@@ -391,15 +389,15 @@ module SH7604 (
 		.DBUS_BURST(DBUS_BURST),
 		.DBUS_LOCK(DBUS_LOCK),
 		.DBUS_WAIT(BSC_BUSY),
-
+		
 		.BSC_ACK(BSC_ACK),
-
+		
 		.DMAC0_IRQ(DMAC0_IRQ),
 		.DMAC0_VEC(DMAC0_VEC),
 		.DMAC1_IRQ(DMAC1_IRQ),
 		.DMAC1_VEC(DMAC1_VEC)
 	);
-
+	
 	bit  [26:0] IA;
 	bit  [31:0] IDI;
 	bit  [31:0] IDO;
@@ -422,9 +420,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.A(IA),
 		.DI(IDI),
 		.DO(IDO),
@@ -443,7 +441,7 @@ module SH7604 (
 		.BRLS_N(BRLS_N),
 		.BGR_N(BGR_N),
 		.MD(MD),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(BSC_DO),
@@ -454,25 +452,25 @@ module SH7604 (
 		.IBUS_LOCK(DBUS_LOCK),
 		.IBUS_BUSY(BSC_BUSY),
 		.IBUS_ACT(),
-
+		
 		.VBUS_A(VBUS_A),
 		.VBUS_DO(VBUS_DO),
 		.VBUS_REQ(VBUS_REQ),
 		.VBUS_BUSY(VBUS_BUSY),
-
+		
 		.IRQ(),
-
+		
 		.CACK(BSC_ACK),
 		.BUS_RLS(BUS_RLS)
 	);
-
+	
 	assign {A,DO}                         = !BUS_RLS ? {IA,IDO}                            : {EA,EDO};
 	assign IDI                            = !BUS_RLS ? DI                                  : EDO;
 	assign {BS_N,CS0_N,CS1_N,CS2_N,CS3_N} = !BUS_RLS ? {IBS_N,ICS0_N,ICS1_N,ICS2_N,ICS3_N} : {EBS_N,ECS0_N,ECS1_N,ECS2_N,ECS3_N};
 	assign {RD_WR_N,CE_N,OE_N,WE_N,RD_N,IVECF_N}  = !BUS_RLS ? {IRD_WR_N,ICE_N,IOE_N,IWE_N,IRD_N,IIVECF_N}  : {ERD_WR_N,ECE_N,EOE_N,EWE_N,ERD_N,EIVECF_N};
 	assign EDI = DI;
-
-
+	
+	
 	SH7604_INTC intc
 	(
 		.CLK(CLK),
@@ -480,11 +478,11 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
 		.NMI_N(NMI_N),
 		.IRL_N(IRL_N),
-
+		
 		.INT_MASK(INT_MASK),
 		.INT_ACK(INT_ACK),
 		.INT_ACP(INT_ACP),
@@ -493,7 +491,7 @@ module SH7604 (
 		.INT_REQ(INT_REQ),
 		.VECT_REQ(VECT_REQ),
 		.VECT_WAIT(VECT_WAIT),
-
+		
 		.UBC_IRQ(UBC_IRQ),
 		.DIVU_IRQ(DIVU_IRQ),
 		.DIVU_VEC(DIVU_VEC),
@@ -510,7 +508,7 @@ module SH7604 (
 		.FRT_ICI_IRQ(ICI_IRQ),
 		.FRT_OCI_IRQ(OCIA_IRQ | OCIB_IRQ),
 		.FRT_OVI_IRQ(OVI_IRQ),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(INTC_DO),
@@ -519,13 +517,13 @@ module SH7604 (
 		.IBUS_REQ(DBUS_REQ),
 		.IBUS_BUSY(INTC_BUSY),
 		.IBUS_ACT(INTC_ACT),
-
+		
 		.VBUS_A(VBUS_A),
 		.VBUS_DI(VBUS_DO),
 		.VBUS_REQ(VBUS_REQ),
 		.VBUS_WAIT(VBUS_BUSY)
 	);
-
+	
 	SH7604_DIVU divu
 	(
 		.CLK(CLK),
@@ -533,9 +531,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.IBUS_A(IBUS_A),
 		.IBUS_DI(IBUS_DO),
 		.IBUS_DO(DIVU_DO),
@@ -544,15 +542,15 @@ module SH7604 (
 		.IBUS_REQ(IBUS_REQ),
 		.IBUS_BUSY(DIVU_BUSY),
 		.IBUS_ACT(DIVU_ACT),
-
+		
 		.IRQ(DIVU_IRQ),
 		.VEC(DIVU_VEC)
 	);
-
+	
 	//Clock divider
 	always @(posedge CLK or negedge RST_N) begin
 		bit [12:0] DIV_CNT;
-
+		
 		if (!RST_N) begin
 			CLK4_CE <= 0;
 			CLK8_CE <= 0;
@@ -568,9 +566,9 @@ module SH7604 (
 			CLK8192_CE <= 0;
 			DIV_CNT <= '0;
 		end
-		else if (CE_R) begin
+		else if (CE_R) begin	
 			DIV_CNT <= DIV_CNT + 13'd1;
-
+			
 			CLK4_CE    <= (DIV_CNT ==? 13'b???????????11);
 			CLK8_CE    <= (DIV_CNT ==? 13'b??????????111);
 			CLK16_CE   <= (DIV_CNT ==? 13'b?????????1111);
@@ -593,19 +591,19 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.RXD(RXD),
 		.TXD(TXD),
 		.SCKO(SCKO),
 		.SCKI(SCKI),
-
+		
 		.CLK4_CE(CLK4_CE),
 		.CLK16_CE(CLK16_CE),
 		.CLK64_CE(CLK64_CE),
 		.CLK256_CE(CLK256_CE),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(SCI_DO),
@@ -614,13 +612,13 @@ module SH7604 (
 		.IBUS_REQ(DBUS_REQ),
 		.IBUS_BUSY(),
 		.IBUS_ACT(SCI_ACT),
-
+		
 		.TEI_IRQ(TEI_IRQ),
 		.TXI_IRQ(TXI_IRQ),
 		.RXI_IRQ(RXI_IRQ),
 		.ERI_IRQ(ERI_IRQ)
 	);
-
+	
 	SH7604_FRT frt
 	(
 		.CLK(CLK),
@@ -628,19 +626,19 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
 		.SBY(SBY),
-
+		
 		.FTOA(FTOA),
 		.FTOB(FTOB),
 		.FTCI(FTCI),
 		.FTI(FTI),
-
+		
 		.CLK8_CE(CLK8_CE),
 		.CLK32_CE(CLK32_CE),
 		.CLK128_CE(CLK128_CE),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(FRT_DO),
@@ -649,13 +647,13 @@ module SH7604 (
 		.IBUS_REQ(DBUS_REQ),
 		.IBUS_BUSY(),
 		.IBUS_ACT(FRT_ACT),
-
+		
 		.ICI_IRQ(ICI_IRQ),
 		.OCIA_IRQ(OCIA_IRQ),
 		.OCIB_IRQ(OCIB_IRQ),
 		.OVI_IRQ(OVI_IRQ)
 	);
-
+	
 	SH7604_WDT wdt
 	(
 		.CLK(CLK),
@@ -663,12 +661,12 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
 		.SBY(SBY),
-
+		
 		.WDTOVF_N(WDTOVF_N),
-
+		
 		.CLK2_CE(CLK8_CE),
 		.CLK64_CE(CLK64_CE),
 		.CLK128_CE(CLK128_CE),
@@ -677,7 +675,7 @@ module SH7604 (
 		.CLK1024_CE(CLK1024_CE),
 		.CLK4096_CE(CLK4096_CE),
 		.CLK8192_CE(CLK8192_CE),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(WDT_DO),
@@ -686,12 +684,12 @@ module SH7604 (
 		.IBUS_REQ(DBUS_REQ),
 		.IBUS_BUSY(),
 		.IBUS_ACT(WDT_ACT),
-
+		
 		.ITI_IRQ(ITI_IRQ),
 		.PRES(WDT_PRES),
 		.MRES(WDT_MRES)
 	);
-
+	
 	SH7604_MSBY msby
 	(
 		.CLK(CLK),
@@ -699,9 +697,9 @@ module SH7604 (
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		.EN(EN),
-
+		
 		.RES_N(RES_SYNC_N),
-
+		
 		.IBUS_A(DBUS_A),
 		.IBUS_DI(DBUS_DO),
 		.IBUS_DO(MSBY_DO),
@@ -710,10 +708,10 @@ module SH7604 (
 		.IBUS_REQ(DBUS_REQ),
 		.IBUS_BUSY(),
 		.IBUS_ACT(MSBY_ACT),
-
+		
 		.SBY(MSBY_SBY)
 	);
-
+	
 	assign SBY = MSBY_SBY & SLEEP;
-
+	
 endmodule

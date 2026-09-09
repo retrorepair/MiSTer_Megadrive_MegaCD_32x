@@ -78,12 +78,7 @@ module s32x_ddr
 
 	// line buffer read side (VDP display stream)
 	input       [8:0] lb_addr,      // word index relative to lp_base (0..323)
-	output     [15:0] lb_q,         // registered: valid the clock after lb_addr
-
-	// telemetry inputs (see tools/phase2_sh2_probe.py)
-	input      [31:0] tel_msh_pc,
-	input      [31:0] tel_ssh_pc,
-	input      [15:0] tel_state
+	output     [15:0] lb_q          // registered: valid the clock after lb_addr
 );
 
 assign DDRAM_CLK = clk;
@@ -163,14 +158,13 @@ reg   [1:0] sdr_be_q;
 assign sdr_busy = sdr_rd_pend | sdr_wr_pend;
 assign sdr_dout = pick16(sdr_cache_d, sdr_a_q[3:1]);
 
-// Draw read: one 16-byte cache line, tagged with {buffer, word address}.
+// draw read: one 16-byte cache line, tagged with {buffer, word address}
 // fbd_addr is a WORD index (0..65535 = 128 KB), unlike sdr_addr which is a byte address with bit 0
-// dropped - so a cache line of 16 bytes is 8 words selected by fbd_addr[2:0], the tag is fbd_addr[15:3]
-// and a beat holds 4 words at fbd_addr[1:0]. The write path already used that numbering; the read path
-// used the byte-address numbering ([3:1] and [15:4]), so reads took the wrong word and compared a tag
-// built from different bits than the one it stored. fbd_ra_q also has to be 17 bits: {fbd_fb, fbd_addr}
-// is 1+16, and truncating it silently dropped the buffer-select bit, so reads could come from the
-// buffer being displayed instead of the one being drawn.
+// dropped: a 16-byte cache line is 8 words selected by fbd_addr[2:0], the tag is fbd_addr[15:3], and a
+// beat holds 4 words at fbd_addr[1:0]. The write path already used that numbering while the read path
+// used the byte-address numbering, so reads took the wrong word and compared a tag built from different
+// bits than the one they stored. fbd_ra_q must also be 17 bits - {fbd_fb, fbd_addr} is 1+16, and
+// truncating it dropped the buffer-select bit, so a read could come from the buffer being displayed.
 reg  [16:3] fbd_cache_a = '1;
 reg         fbd_cache_v = 0;
 reg [127:0] fbd_cache_d;
@@ -223,7 +217,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg   [1:0] tel_pend = 0;    // 3 = counters, 2 = PCs, 1 = 32X state
+reg         tel_pend = 0;
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -295,7 +289,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 2'd3;
+		if (&tel_timer) tel_pend <= 1;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -353,27 +347,15 @@ always @(posedge clk) begin
 		case (state)
 		S_IDLE: begin
 			// priority: display prefetch (deadline) > queued draw writes > SH-2 write > draw read > SH-2 read
-			if (TELEMETRY && |tel_pend) begin
-				tel_pend  <= tel_pend - 1'd1;
+			if (TELEMETRY && tel_pend) begin
+				tel_pend  <= 0;
+				tel_seq   <= tel_seq + 1'd1;
+				ram_addr  <= BASE_TEL;
+				ram_din   <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
 				ram_be    <= 8'hFF;
 				ram_burst <= 8'd1;
 				ram_wr    <= 1;
 				state     <= S_WR;
-				case (tel_pend)
-					2'd3: begin
-						tel_seq  <= tel_seq + 1'd1;
-						ram_addr <= BASE_TEL;
-						ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
-					end
-					2'd2: begin
-						ram_addr <= BASE_TEL + 25'd1;
-						ram_din  <= {tel_msh_pc, tel_ssh_pc};
-					end
-					default: begin
-						ram_addr <= BASE_TEL + 25'd2;
-						ram_din  <= {16'h5333, tel_state, 32'h00000000};
-					end
-				endcase
 			end
 			else if (lp_pend) begin
 				lp_pend    <= 0;
