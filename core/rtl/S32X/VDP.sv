@@ -173,7 +173,13 @@ module S32X_VDP
 					DO <= PAL_IO_Q;
 					ACK_N <= 0;
 				end
-			end else if (!DRAM_CS_N && (!LWR_N || !UWR_N || !RD_N) && ACK_N && !FEN) begin
+			// FEN (auto-fill or the per-scanline refresh emulation) must block NEW frame-buffer accesses,
+			// but not this branch while a read is already in flight: FBD_RDY from the DDR3 port is a
+			// one-clock pulse, and refresh covers ~80 clocks of every line, so a read that completed
+			// inside that window was discarded - FB_RD_WAIT stayed set, ACK_N was never asserted, and
+			// the SH-2 waited on the VDP for ever while everything else kept running. FB_RD_WAIT is only
+			// ever set together with a read cycle, so this cannot let a write through.
+			end else if (!DRAM_CS_N && (!LWR_N || !UWR_N || !RD_N) && ACK_N && (!FEN || FB_RD_WAIT)) begin
 				if (!RD_N && !FIFO_FB_WRITE && FIFO_EMPTY) begin
 					// read through the DDR3 draw port: one request, acknowledged when the data is back
 					// (the real DRAM answered in ~7 clocks; DDR3 takes a little longer on a cache miss)
@@ -195,6 +201,8 @@ module S32X_VDP
 				end
 			end else if (LWR_N && UWR_N && RD_N && !ACK_N) begin
 				ACK_N <= 1;
+				FB_RD_WAIT <= 0;	// never carry a half-finished read into the next access: with it set,
+				FB_RD <= 0;			// the next read would skip the request and never pulse FB_RD again
 			end
 
 			if (FILL_PEND && CE_R) begin

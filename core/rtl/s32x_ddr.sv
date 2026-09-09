@@ -163,13 +163,20 @@ reg   [1:0] sdr_be_q;
 assign sdr_busy = sdr_rd_pend | sdr_wr_pend;
 assign sdr_dout = pick16(sdr_cache_d, sdr_a_q[3:1]);
 
-// draw read: one 16-byte cache line, tagged with {buffer, word address}
-reg  [16:4] fbd_cache_a = '1;
+// Draw read: one 16-byte cache line, tagged with {buffer, word address}.
+// fbd_addr is a WORD index (0..65535 = 128 KB), unlike sdr_addr which is a byte address with bit 0
+// dropped - so a cache line of 16 bytes is 8 words selected by fbd_addr[2:0], the tag is fbd_addr[15:3]
+// and a beat holds 4 words at fbd_addr[1:0]. The write path already used that numbering; the read path
+// used the byte-address numbering ([3:1] and [15:4]), so reads took the wrong word and compared a tag
+// built from different bits than the one it stored. fbd_ra_q also has to be 17 bits: {fbd_fb, fbd_addr}
+// is 1+16, and truncating it silently dropped the buffer-select bit, so reads could come from the
+// buffer being displayed instead of the one being drawn.
+reg  [16:3] fbd_cache_a = '1;
 reg         fbd_cache_v = 0;
 reg [127:0] fbd_cache_d;
 reg         fbd_rd_pend = 0;
-reg  [16:1] fbd_ra_q;
-assign fbd_dout = pick16(fbd_cache_d, fbd_ra_q[3:1]);
+reg  [16:0] fbd_ra_q;
+assign fbd_dout = pick16(fbd_cache_d, fbd_ra_q[2:0]);
 
 // draw write FIFO: {fb, addr[15:0], be[1:0], data[15:0]}
 (* ramstyle = "logic" *) reg [34:0] wfifo[8];
@@ -265,13 +272,13 @@ always @(posedge clk) begin
 	// ---- accept draw requests
 	if (fbd_rd && !old_fbd_rd && !fbd_rd_pend) begin
 		fbd_ra_q <= {fbd_fb, fbd_addr};
-		if (fbd_cache_v && fbd_cache_a == {fbd_fb, fbd_addr[15:4]}) fbd_rdy <= 1;
+		if (fbd_cache_v && fbd_cache_a == {fbd_fb, fbd_addr[15:3]}) fbd_rdy <= 1;
 		else fbd_rd_pend <= 1;
 	end
 	if (|fbd_wr && !old_fbd_wr && !wf_full) begin
 		wfifo[wf_wp] <= {fbd_fb, fbd_addr, fbd_wr, fbd_din};
 		wf_wp <= wf_wp + 1'd1;
-		if (fbd_cache_v && fbd_cache_a == {fbd_fb, fbd_addr[15:4]}) fbd_cache_d <= upd16(fbd_cache_d, fbd_addr[3:1], fbd_din, fbd_wr);
+		if (fbd_cache_v && fbd_cache_a == {fbd_fb, fbd_addr[15:3]}) fbd_cache_d <= upd16(fbd_cache_d, fbd_addr[2:0], fbd_din, fbd_wr);
 	end
 
 	// ---- prefetch request
@@ -395,12 +402,12 @@ always @(posedge clk) begin
 				state     <= S_WR;
 			end
 			else if (fbd_rd_pend) begin
-				ram_addr    <= (fbd_ra_q[16] ? BASE_FB1 : BASE_FB0) + {12'd0, fbd_ra_q[15:4], 1'b0};
+				ram_addr    <= (fbd_ra_q[16] ? BASE_FB1 : BASE_FB0) + {11'd0, fbd_ra_q[15:3], 1'b0};
 				ram_burst   <= 8'd2;
 				ram_rd      <= 1;
 				kind        <= 1;
 				beat        <= 0;
-				fbd_cache_a <= fbd_ra_q[16:4];
+				fbd_cache_a <= fbd_ra_q[16:3];
 				fbd_cache_v <= 0;
 				state       <= S_RD_LINE;
 			end
