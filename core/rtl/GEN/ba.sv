@@ -485,9 +485,10 @@ module BA
 				end
 				
 			MBUS_FDC_READ:
-				// the Mega CD gate array answers on /FDC ($A12000) with its own /DTACK (register data, Word RAM
-				// handshake); srg320's MD-only arbiter auto-terminated the cycle, which returned stale data here
-				if (!DTACK_N) begin
+				// NOTE (deferred, see HANDOFF): the Mega CD answers $A12000 with its own /DTACK and the old gen
+				// waited for it; waiting here hangs the boot when nothing answers, so keep srg320's
+				// auto-termination until the corruption work is picked up again.
+				begin
 					M68K_MBUS_DTACK_N <= ~(msrc == MSRC_M68K);
 					VDP_MBUS_DTACK_N <= ~(msrc == MSRC_VDP);
 					Z80_MBUS_DTACK_N <= ~(msrc == MSRC_Z80);
