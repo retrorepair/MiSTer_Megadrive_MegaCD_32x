@@ -292,3 +292,7 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to SDIO_DAT[*]
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to SD_SPI*
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to USER_IO[*]
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to VGA_EN
+set_global_assignment -name QIP_FILE rtl/CART/cart.qip
+set_global_assignment -name QIP_FILE rtl/SH/SH7604/SH7604.qip
+set_global_assignment -name QIP_FILE rtl/S32X/S32X.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/s32x_ddr.sv
