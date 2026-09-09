@@ -1,0 +1,23 @@
+# Quartus build products
+**/db/
+**/incremental_db/
+**/output_files/
+**/simulation/
+**/greybox_tmp/
+*.qws
+*.rpt
+*.smsg
+*.summary
+*.done
+*.jdi
+*.pin
+*.sof
+*.rbf
+*.sld
+*.pof
+*.log
+*.log.err
+c5_pin_model_dump.txt
+build_id.v
+# scratch
+__pycache__/
