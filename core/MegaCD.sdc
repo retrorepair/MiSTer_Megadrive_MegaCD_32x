@@ -18,3 +18,21 @@ set_multicycle_path -from [get_clocks { *|pll|pll_inst|altera_pll_i|*[0].*|divcl
 # data, so nothing samples it for at least ~19 ns. Allow four cycles to match that guarantee.
 set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -setup 3
 set_multicycle_path -from [get_registers {*sdram:sdram|dout*}] -hold 2
+
+# The remaining failures are the rest of the same crossing. clk_ram (outclk_0, counter[0]) and clk_sys
+# (outclk_1, counter[1]) come from one PLL, so Quartus times transfers between them against the closest
+# edge pair (~4.7 ns) even though every such transfer here is handshake-bounded and stable for many
+# cycles:
+#   clk_ram -> clk_sys : SDRAM read data and per-port busy. sdram.sv holds busy two extra clk_ram cycles
+#                        after capturing the data, so nothing samples either for ~19 ns.
+#   clk_sys -> clk_ram : SDRAM request address/strobes from the MD arbiter and the SH-2 bus controllers,
+#                        held by the requester for the whole access; and the video path into video_mixer,
+#                        where pixel data is stable for ~16 clk_ram cycles at a 6.7 MHz pixel rate.
+set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] \
+                    -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].output_counter|divclk}] -setup 3
+set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] \
+                    -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].output_counter|divclk}] -hold 2
+set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].output_counter|divclk}] \
+                    -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] -setup 2
+set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].output_counter|divclk}] \
+                    -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] -hold 1
