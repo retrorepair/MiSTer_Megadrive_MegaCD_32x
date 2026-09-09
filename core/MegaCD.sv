@@ -230,6 +230,7 @@ localparam CONF_STR = {
 	"H2O[60],Enable BGB,Yes,No;",
 	"H2O[61],Enable SPR,Yes,No;",
 	"H2O[62],MCD RAM,Banks 2&3,Banks 0&1;",
+	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2-;",
 	//"R1,Reset;"
 	"R0,Reset & Eject CD;",
@@ -733,10 +734,11 @@ wire  [4:0] S32X_R, S32X_G, S32X_B;
 wire        S32X_YSO_N;
 wire [15:0] S32X_PWM_L, S32X_PWM_R;
 
-S32X #(.USE_ROM_WAIT(1), .SH2_EXACT(1)) S32X
+S32X #(.USE_ROM_WAIT(1)) S32X
 (
 	.CLK(clk_sys),
 	.RST_N(~(reset | rom_download)),
+	.SH2_DIV2(status[2]),
 
 	.VCLK(GEN_VCLK_CE),
 	.VA(GEN_VA),

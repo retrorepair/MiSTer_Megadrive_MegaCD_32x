@@ -1,8 +1,9 @@
 module S32X
-#(parameter bit USE_ROM_WAIT=0, bit SH2_EXACT=1)
+#(parameter bit USE_ROM_WAIT=0)
 (
 	input             CLK,
 	input             RST_N,
+	input             SH2_DIV2,	// 0: 23.011 MHz (3 of 7 clocks, as the real 32X); 1: CLK/2 = 26.85 MHz (srg320's rate)
 
 	input             VCLK,
 	input      [23:1] VA,
@@ -86,7 +87,7 @@ module S32X
 		bit [2:0] CLK_CNT;
 		CLK_CNT <= CLK_CNT == 3'd6 ? 3'd0 : CLK_CNT + 3'd1;
 
-		if (SH2_EXACT) begin
+		if (!SH2_DIV2) begin
 			CE_F <= 0;
 			CE_R <= 0;
 			case (CLK_CNT)

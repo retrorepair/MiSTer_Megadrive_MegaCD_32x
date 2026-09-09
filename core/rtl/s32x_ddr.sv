@@ -88,6 +88,8 @@ localparam [24:0] BASE_SDR = 25'h0000000;
 localparam [24:0] BASE_FB0 = 25'h0020000;   // 0x100000 / 8
 localparam [24:0] BASE_FB1 = 25'h0024000;   // 0x120000 / 8
 localparam [14:0] FB_BEATS = 15'd16384;     // 128 KB / 8
+localparam [24:0] BASE_TEL = 25'h0040000;   // 0x200000 / 8: one telemetry beat (see tools/phase2_telemetry.py)
+localparam        TELEMETRY = 1;
 localparam  [6:0] LP_BEATS = 7'd81;         // 324 words from the beat holding lp_start: >= 320 at any alignment
 
 //----------------------------------------------------------------------------
@@ -205,6 +207,11 @@ reg   [7:0] ram_be;
 reg         ram_rd = 0, ram_wr = 0;
 reg         beat;
 reg         lp_pend = 0, lp_fb_q;
+// telemetry counters
+reg  [15:0] tel_seq = 0;
+reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
+reg  [16:0] tel_timer = 0;
+reg         tel_pend = 0;
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -269,6 +276,16 @@ always @(posedge clk) begin
 		lp_line_q <= lp_line;
 	end
 
+	// telemetry: count the traffic and ask for a write every ~1.2 ms
+	if (TELEMETRY) begin
+		if (sdr_rd && !old_sdr_rd) tel_sdr_rd <= tel_sdr_rd + 1'd1;
+		if (|sdr_wr && !old_sdr_wr) tel_sdr_wr <= tel_sdr_wr + 1'd1;
+		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
+		if (lp_done) tel_lp <= tel_lp + 1'd1;
+		tel_timer <= tel_timer + 1'd1;
+		if (&tel_timer) tel_pend <= 1;
+	end
+
 	// ---- returning data (independent of DDRAM_BUSY)
 	if (DDRAM_DOUT_READY) begin
 		case (state)
@@ -324,7 +341,17 @@ always @(posedge clk) begin
 		case (state)
 		S_IDLE: begin
 			// priority: display prefetch (deadline) > queued draw writes > SH-2 write > draw read > SH-2 read
-			if (lp_pend) begin
+			if (TELEMETRY && tel_pend) begin
+				tel_pend  <= 0;
+				tel_seq   <= tel_seq + 1'd1;
+				ram_addr  <= BASE_TEL;
+				ram_din   <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
+				ram_be    <= 8'hFF;
+				ram_burst <= 8'd1;
+				ram_wr    <= 1;
+				state     <= S_WR;
+			end
+			else if (lp_pend) begin
 				lp_pend    <= 0;
 				lp_tab_idx <= lp_line_q[1:0];
 				ram_addr   <= fb_base + {19'd0, lp_line_q[7:2]};   // the table entry is word lp_line of the buffer
