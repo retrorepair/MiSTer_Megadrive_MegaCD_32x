@@ -570,3 +570,43 @@ Phase 0 sanity: the pristine MegaCD build boots the (EU) BIOS on the MiSTer (`ph
   rate) or srg320's CLK/2 = 26.8 MHz. Lets both be tested without a rebuild.
 - Live DDR3 sampling with the game running showed **no change at all** in the SH-2 work RAM or either frame buffer,
   which is what the telemetry beat is there to explain (dead DDR3 path vs SH-2s never started).
+
+## 2026-09-10 overnight — audit results and the five fixes now in the tree
+
+A four-agent read-only audit of the merge against pristine upstream (script kept at
+`.claude/.../workflows/scripts/md-mcd-32x-audit-4-*.js`, full findings in that run's `journal.jsonl`)
+found the defects below. All five are now applied on top of the last configuration proven to run on
+hardware (commit 3de4ac9, the build that played Alien 3 and reached Doom's region check).
+
+1. **SDRAM read data crossed clk_ram -> clk_sys with no settling time** (`rtl/sdram.sv`). Consumers sample a
+   port's data on the SAME edge at which they first see its busy drop, so a ~13 ns path had ~9 ns. The
+   fitter reported -8 ns on every `dout` bit and whether a build worked came down to placement - this is
+   what made builds flip between running and dead with no functional change. Each port's busy is now held
+   two extra clk_ram cycles after capture, with a matching multicycle (3/2) in `MegaCD.sdc`.
+2. **The 32X frame-buffer read used byte-address bit numbering against a word-address port**, and
+   `fbd_ra_q` was 16 bits for a 17-bit value so the buffer-select bit was truncated: reads took the wrong
+   word, possibly from the buffer being displayed (`rtl/s32x_ddr.sv`).
+3. **The VDP threw away the one-clock DDR3 read-ready pulse** whenever it landed in the per-scanline
+   refresh window (~80 of every ~1700 clocks), because the branch that consumes it is gated on `!FEN`.
+   The SH-2 then waited on the VDP for ever while the display prefetch, the telemetry and the 68000 kept
+   running - exactly the observed signature (`rtl/S32X/VDP.sv`).
+4. **Every SH-2 cache-line burst beat latched the previous word** (`rtl/s32x_ddr.sv`): the line was
+   indexed by a registered copy of the address that updates one clk_sys too late, because this module runs
+   at half the clock upstream's `ddram.sv` uses. The BSC re-drives the address on its CE_R half and latches
+   data on the next CE_F half without re-checking WAIT_N, so a line filled as w0,w0,w1,w2,... Now indexed
+   from the live address while the read is asserted.
+5. **The Mega CD gate array was given the bus arbiter's /AS instead of the 68000's own**
+   (`rtl/GEN/ba.sv`, `gen.sv`, `MegaCD.sv`). `ASIC.vhd` selects between the fresh Word-RAM word and the
+   previously latched one with `EXT_AS_N`; the S32X-revision gen exports `MBUS_AS_N`, asserted for VDP-DMA
+   and Z80 cycles too, shifting every DMAed word by one position. That is the corrupt logo band, and it has
+   been present since the very first Phase-1 build (gen swap only, no 32X). gen now exports the CPU strobe
+   separately; the 32X keeps the arbiter's AS, which it needs to see DMA and Z80 cartridge cycles.
+
+**Ruled out with evidence** (do not re-investigate): SDRAM fixed port priority starving the Mega CD (with
+no cartridge, port 0 has no traffic); and `ba.sv` MBUS_FDC_READ auto-terminating $A12000 (differs from
+upstream by one MCLK and cannot produce stale gate-array reads). An earlier HANDOFF entry named the latter
+as a root cause - it is not.
+
+**Also learnt:** the SH-2 PC probe, the per-port read registers and the SH-2 clock default flip all
+correlate with dead builds and were dropped; re-add them one at a time, if at all. Routing two 32-bit PCs
+across a 77%-full device is the most likely reason.
