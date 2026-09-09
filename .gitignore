@@ -21,3 +21,6 @@ c5_pin_model_dump.txt
 build_id.v
 # scratch
 __pycache__/
+
+# upstream documentation PDFs (large; not needed for the build)
+**/docs/*.pdf
