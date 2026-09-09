@@ -3,7 +3,7 @@
 //  Copyright (c) 2017-2019 Sorgelig
 //
 //  YM2612 implementation by Jose Tejada Gomez. Twitter: @topapate
-//  Original Genesis code: Copyright (c) 2010-2013 Gregory Estrade (greg@torlus.com) 
+//  Original Genesis code: Copyright (c) 2010-2013 Gregory Estrade (greg@torlus.com)
 //
 //  This program is free software; you can redistribute it and/or modify it
 //  under the terms of the GNU General Public License as published by the Free
@@ -162,8 +162,8 @@ always @(posedge CLK_50M) begin
 end
 
 // Status Bit Map:
-//             Upper                             Lower              
-// 0         1         2         3          4         5         6   
+//             Upper                             Lower
+// 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
 // XXXXXXXXX XXXXXXXXXXXXXXXXXX XXX XXXXXXXXXXXXXXXXXXXXXXXXXXX
@@ -230,7 +230,7 @@ localparam CONF_STR = {
 	"H2O[60],Enable BGB,Yes,No;",
 	"H2O[61],Enable SPR,Yes,No;",
 	"H2O[62],MCD RAM,Banks 2&3,Banks 0&1;",
-	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
+	"H2O[2],SH2 Clock,26.8MHz,23.0MHz;",
 	"H2-;",
 	//"R1,Reset;"
 	"R0,Reset & Eject CD;",
@@ -238,7 +238,7 @@ localparam CONF_STR = {
 	"R[38],Eject Disc;",
 	"J1,A,B,C,Start,Mode,X,Y,Z;",
 	"jn,A,B,R,Start,Select,X,Y,L;", // name map to SNES layout.
-	"jp,Y,B,A,Start,Select,L,X,R;", // positional map to SNES layout (3 button friendly)  
+	"jp,Y,B,A,Start,Select,L,X,R;", // positional map to SNES layout (3 button friendly)
 	"V,v",`BUILD_DATE
 };
 
@@ -317,9 +317,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.img_mounted(img_mounted),
 	.img_readonly(img_readonly),
 	.img_size(img_size),
-	
+
 	.gamma_bus(gamma_bus),
-	
+
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse),
 
@@ -344,13 +344,13 @@ always @(posedge clk_sys) begin
 	reg old_stb;
 	reg enter = 0;
 	reg esc = 0;
-	
+
 	old_stb <= ps2_key[10];
 	if(old_stb ^ ps2_key[10]) begin
 		if(ps2_key[7:0] == 'h5A) enter <= ps2_key[9];
 		if(ps2_key[7:0] == 'h76) esc   <= ps2_key[9];
 	end
-	
+
 	if(enter & esc) begin
 		dbg_menu <= ~dbg_menu;
 		enter <= 0;
@@ -608,22 +608,22 @@ MCD MCD
 	.PRG_WRH_N(MCD_PRG_WRH_N),
 	.PRG_OE_N(MCD_PRG_OE_N),
 	.PRG_RDY(~MCD_PRG_BUSY),
-	
+
 	.ROM_DI(GEN_MEM_DO),
 	.ROM_CE_N(GEN_ROM_CE_N),
 	.ROM_RDY(~GEN_MEM_BUSY),
-	
+
 	.BRAM_A(MCD_BRAM_ADDR),
 	.BRAM_DI(MCD_BRAM_DI),
 	.BRAM_DO(MCD_BRAM_DO),
 	.BRAM_WE(MCD_BRAM_WE),
-	
+
 	.CDD_STAT(scd_cdd_stat),
 	.CDD_COMM(scd_cdd_comm),
 	.CDD_SEND(scd_cdd_send),
 	.CDD_REC(scd_cdd_rec),
 	.CDD_DM(scd_cdd_dm),
-	
+
 	.CDC_DATA(cdc_d),
 	.CDC_DAT_WR(cdc_wr & (cdc_dat_download | cdc_cdda_download)),
 	.CDC_SC_WR(cdc_wr & cdc_sub_download),
@@ -641,7 +641,7 @@ MCD MCD
 	.PCM_SR(MCD_PCM_SR),
 	.CDDA_SL(MCD_CDDA_SL),
 	.CDDA_SR(MCD_CDDA_SR),
-	
+
 	.LED_RED(MCD_LED_RED),
 	.LED_GREEN(MCD_LED_GREEN)
 );
@@ -691,7 +691,7 @@ always @(posedge clk_sys) begin
 		aud_l <= GEN_AUDL;
 		aud_r <= GEN_AUDR;
 	end
-	
+
 	cmp_l <= compr(aud_l);
 	cmp_r <= compr(aud_r);
 end
@@ -733,12 +733,14 @@ wire [15:0] S32X_LB_Q;
 wire  [4:0] S32X_R, S32X_G, S32X_B;
 wire        S32X_YSO_N;
 wire [15:0] S32X_PWM_L, S32X_PWM_R;
+wire [31:0] S32X_MSH_PC, S32X_SSH_PC;
+wire [15:0] S32X_DBG_STATE;
 
 S32X #(.USE_ROM_WAIT(1)) S32X
 (
 	.CLK(clk_sys),
 	.RST_N(~(reset | rom_download)),
-	.SH2_DIV2(status[2]),
+	.SH2_DIV2(~status[2]),   // default = srg320's CLK/2; bit 2 selects the exact 23.011 MHz
 
 	.VCLK(GEN_VCLK_CE),
 	.VA(GEN_VA),
@@ -808,7 +810,10 @@ S32X #(.USE_ROM_WAIT(1)) S32X
 	.PWM_L(S32X_PWM_L),
 	.PWM_R(S32X_PWM_R),
 
-	.DBG_CA()
+	.DBG_CA(),
+	.DBG_MSH_PC(S32X_MSH_PC),
+	.DBG_SSH_PC(S32X_SSH_PC),
+	.DBG_STATE(S32X_DBG_STATE)
 );
 
 // the game cartridge behind the 32X (mappers, SRAM, EEPROM); ROM and SRAM live in SDRAM port 0
@@ -912,12 +917,16 @@ s32x_ddr s32x_ddr
 	.lp_done(),
 
 	.lb_addr(S32X_LB_ADDR),
-	.lb_q(S32X_LB_Q)
+	.lb_q(S32X_LB_Q),
+
+	.tel_msh_pc(S32X_MSH_PC),
+	.tel_ssh_pc(S32X_SSH_PC),
+	.tel_state(S32X_DBG_STATE)
 );
 
 always @(posedge clk_sys) begin
 	reg old_busy;
-	
+
 	old_busy <= tmpram_busy;
 	if(rom_download & ioctl_wr) ioctl_wait <= 1;
 	if(old_busy & ~tmpram_busy) ioctl_wait <= 0;
@@ -1029,7 +1038,7 @@ always @(posedge clk_sys) begin
 	reg state;
 
 	tmpram_lba <= sd_lba[0][10:0]-11'h10;
-	
+
 	tmpram_busy_d <= tmpram_busy;
 	if(~tmpram_busy_d & tmpram_busy) tmpram_req <= 0;
 
@@ -1063,7 +1072,7 @@ always @(posedge clk_sys) begin
 	reg scd_cdd_send_old = 0;
 	reg [2:0] cnt = 0;
 	reg rst_old = 0;
-	
+
 	if (cd_out[48] != cd_out48_last)  begin
 		cd_out48_last <= cd_out[48];
 		scd_cdd_stat <= cd_out[39:0];
@@ -1077,7 +1086,7 @@ always @(posedge clk_sys) begin
 	else begin
 		scd_cdd_rec <= 0;
 	end
-	
+
 	scd_cdd_send_old <= scd_cdd_send;
 	if (scd_cdd_send && !scd_cdd_send_old) begin
 		cd_in[47:0] <= {8'h00,scd_cdd_comm};
@@ -1120,13 +1129,13 @@ reg new_vmode;
 always @(posedge clk_sys) begin
 	reg old_pal;
 	int to;
-	
+
 	if(~(reset | rom_download)) begin
 		old_pal <= PAL;
 		if(old_pal != PAL) to <= 5000000;
 	end
 	else to <= 5000000;
-	
+
 	if(to) begin
 		to <= to - 1;
 		if(to == 1) new_vmode <= ~new_vmode;
@@ -1137,7 +1146,7 @@ end
 reg [1:0] res;
 always @(posedge clk_sys) begin
 	reg old_vbl;
-	
+
 	old_vbl <= vblank;
 	if(old_vbl & ~vblank) res <= resolution;
 end
@@ -1277,10 +1286,10 @@ reg  [1:0] region;
 reg        region_set = 0;
 always @(posedge clk_sys) begin
 	reg [15:0] to = 0;
-	
+
 	region <= region_new;
 	if(region != region_new) to <= 0;
-	
+
 	region_set <= 0;
 	if(~&to) begin
 		to <= to + 1'd1;
@@ -1409,11 +1418,11 @@ wire [1:0] SER_OPT;
 always @(posedge clk_sys) begin
 	if (status[46]) begin
 		SERJOYSTICK_IN[0] <= USER_IN[1];//up
-		SERJOYSTICK_IN[1] <= USER_IN[0];//down	
-		SERJOYSTICK_IN[2] <= USER_IN[5];//left	
+		SERJOYSTICK_IN[1] <= USER_IN[0];//down
+		SERJOYSTICK_IN[2] <= USER_IN[5];//left
 		SERJOYSTICK_IN[3] <= USER_IN[3];//right
-		SERJOYSTICK_IN[4] <= USER_IN[2];//b TL		
-		SERJOYSTICK_IN[5] <= USER_IN[6];//c TR GPIO7			
+		SERJOYSTICK_IN[4] <= USER_IN[2];//b TL
+		SERJOYSTICK_IN[5] <= USER_IN[6];//c TR GPIO7
 		SERJOYSTICK_IN[6] <= USER_IN[4];//  TH
 		SERJOYSTICK_IN[7] <= 0;
 		SER_OPT[0] <= ~status[4];
