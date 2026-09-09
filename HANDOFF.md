@@ -458,3 +458,24 @@ At 4,109 ALMs / 4 M10K each the SH-2 is already lean; nothing large can be remov
 
 ### Sub-CPU option (user 2026-09-09: NukedMD parts allowed where they slot in)
 Nuked sub-68000 (`m68kcpu`): 3,813 ALMs + 14 M10K vs fx68k 2,006 + 6. Slots in through the NukedMD project's `MC68K.vhd` wrapper (226 changed lines) and buys the verificator's VAR/REG8030 results on the sub side. Affordable in ALMs; the +8 M10K only if work RAM goes to SDRAM. Decide in Phase 1 after the base fit.
+
+## Phase 1 (started 2026-09-09) — base core `core/`
+Decision confirmed with the user: the MD is fpgagen ("not NukedMD unless parts slot in without issue").
+
+`core/` = MegaCD_ORIG top/framework/MCD plumbing + S32X's `rtl/GEN` (newer gen.sv, ba.sv, vdp.sv) + S32X's `rtl/FX68K` +
+the NukedMD-MegaCD MCD fixes. Built by `tools/phase1_top_edit.py` (asserting replacements on the pristine top) plus the
+scripted MCD.vhd edit; the diff from upstream is therefore reproducible. Changes:
+- gen ports adapted (LWR/UWR/CAS0 strobes, MEM_RDY, EXT channel = CD audio, BGA/BGB/SPR enables, DAC_CE restored by
+  taking the old `genesis_lpf.v`/`audio_iir_filter.v` which export the sample enable). /TIME reads (mappers, Pier EEPROM)
+  now go through the VDI mux (`GEN_VDI = !TIME_N ? GEN_PAGE_DI : ...`) because the new gen has no TIME_DI port.
+- 68K work RAM is inside the new gen (64 M10K) — the old gen kept it in SDRAM. Revisit in Phase 2 if M10K is short.
+- `rtl/sdram.sv` = the NukedMD 5-port controller: port0 main bus (cart ROM/RAM, MCD BIOS), 1 PRG-RAM, 2 PCM RAM
+  (`rtl/pcm_mem.sv`, 64 M10K saved), 3 load/save, 4 spare.
+- MCD block: NukedMD `ASIC.vhd`/`CDC.vhd`/`PCM.vhd` verbatim; `MCD.vhd` = NukedMD version minus the Nuked-only MCLK/CLK_LEVEL
+  wiring (sub-CPU stays fx68k for now) and minus Game Genie. `EN50` from a `CEGen` (50 MHz) in the top.
+- Stripped: both Game Genie engines, Cheats and CRAM-Dots OSD items. TRANSP_DETECT (adaptive blend) is constant 0 (the SV VDP has none).
+- Region is sniffed from the BIOS header only (`~ioctl_index[6]`).
+- Still present, to strip in Phase 2 if needed: Hq2x (inside `sys/scandoubler.v`, 668 ALMs + 14 M10K — needs a plain
+  line-buffer stand-in with the same `Hq2x` interface), video_freak, lightgun, Pier EEPROM.
+- Test MGLs in `tools/mgl/` (rbf prefix `_Console/MegaCD_P1_20260909`); deploy with `tools/deploy.sh`.
+Phase 0 sanity: the pristine MegaCD build boots the (EU) BIOS on the MiSTer (`phase0/shots/p0orig_boot.png`); timing met.
