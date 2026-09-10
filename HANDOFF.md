@@ -794,3 +794,19 @@ fresh session rather than a 3am edit to a working build.
 
 To re-enable telemetry set `TELEMETRY = 1` in `core/rtl/s32x_ddr.sv` and rebuild; read it with
 `python3 /media/fat/hpsmem.py read 30200000 8` (counters) and `... 30200008 8` (audio peaks).
+
+### Negative result: the MEM_RDY hypothesis is WRONG (branch `memrdy-experiment`, not merged)
+Qualifying `MEM_RDY` by address so cartridge cycles self-terminate on the cartridge SDRAM port, exactly as
+srg320's S32X core does, while the Mega CD windows keep waiting for the gate array - **does not fix the
+verificator**. It still hangs at "System init...", and timing got marginally worse (-0.011 ns clk_sys).
+The branch is kept for reference but is NOT the answer; do not spend time re-deriving it.
+
+What that leaves, given the verificator gets *past* System init on both b66 (NukedMD MD) and, per the
+previous project's notes, on upstream srg320 MegaCD (fpgagen MD, where it reached CDC INIT):
+- it is not cartridge-cycle termination (ruled out here)
+- it is not region, and not the /FDC DTACK wait (ruled out earlier)
+- so suspect the paths this merge added between the MD and the Mega CD for a **cartridge boot**
+  specifically: the Mega CD BIOS window read path (`sdram` port 1 addressed with `GEN_VA[16:1]`), the
+  `GEN_VDI` source mux keyed on `~S32X_DTACK_N`, or the 32X sitting in the cartridge path at all.
+  A cheap next experiment: temporarily force `GEN_VDI` to select `MCD_DO` by address (`EXT_ROM_N`,
+  `GEN_RAS2_N`, `EXT_FDC_N`) rather than by the 32X's DTACK, and see whether detection proceeds.
