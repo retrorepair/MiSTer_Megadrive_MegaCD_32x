@@ -501,7 +501,11 @@ module S32X_VDP
 	assign B = PIX_COLOR[14:10] & {5{HDISP[2]&~VBLK}};
 	assign HS_N = HSYNC_N_SYNC & VSYNC_N_SYNC;
 	assign VS_N = VSYNC_N_SYNC;
-	assign YSO_N = ~((PRI ^ PIX_COLOR[15]) & |MODE) & YS_N_SYNC;
+	// A blanked 32X VDP (MODE = 0) has no pixel to show, so it must not replace the Mega Drive's.
+	// Without the `| ~|MODE` this collapses to YSO_N = YS_N_SYNC and every Mega Drive BACKDROP pixel
+	// selects the 32X output, which is black - a one-scanline black bar across the Mega CD BIOS
+	// border on alternate frames. See tools/phase10_ys_gate.py for the measurement.
+	assign YSO_N = ~((PRI ^ PIX_COLOR[15]) & |MODE) & (YS_N_SYNC | ~|MODE);
 
 	assign FB_DRAW_A  = FILL_EXEC ? AFAR : FB_WR ? FIFO_FB_A[16:1] : A[16:1];
 	assign FB_DRAW_D  = FILL_EXEC ? AFDR : FB_WR ? FIFO_FB_D       : DI;
