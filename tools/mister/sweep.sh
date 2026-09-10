@@ -6,6 +6,11 @@
 set -e
 cd "$(dirname "$0")/../.."
 CORE="${1:-MegaCD_P3}"; OUT="${2:-sweep_shots}"; shift 2 || true
+# --f2 presses the core's force-US hotkey after each load. Main auto-loads an EU boot.rom, so the
+# console comes up PAL and every 32X title stops at its region-lock screen; the CD tiers do not care.
+F2=""
+for a in "$@"; do [ "$a" = "--f2" ] && F2="python3 /media/fat/uinput_kbd.py --send f2; sleep 20;"; done
+set -- $(for a in "$@"; do [ "$a" = "--f2" ] || echo "$a"; done)
 MISTER=192.168.1.182
 HK="SHA256:FqNJOsj3FLUoMQxgn+cqGoXvVfENmVK4QFoSCMKl2lU"
 PLINK="/c/Program Files/PuTTY/plink.exe"; PSCP="/c/Program Files/PuTTY/pscp.exe"
@@ -18,7 +23,7 @@ mkdir -p "$OUT"; rm -f "$OUT"/*.png
 sh_ "rm -f /media/fat/screenshots/sw_*.png" >/dev/null
 for t in "${TESTS[@]}"; do
   echo "=== $t"
-  sh_ "echo load_core /media/fat/_Console/${CORE}_${t}.mgl > /dev/MiSTer_cmd; sleep 12; /media/fat/settle.sh 8 150 || true; sleep 10; echo 'screenshot sw_${t}.png' > /dev/MiSTer_cmd; sleep 4" >/dev/null
+  sh_ "echo load_core /media/fat/_Console/${CORE}_${t}.mgl > /dev/MiSTer_cmd; sleep 12; /media/fat/settle.sh 8 150 || true; sleep 10; $F2 echo 'screenshot sw_${t}.png' > /dev/MiSTer_cmd; sleep 4" >/dev/null
   # two telemetry reads a few seconds apart: a moving seq means the core is alive
   a=$(sh_ "python3 /media/fat/hpsmem.py read 30200000 8 | tr -d ' \n'")
   s=$(sh_ "python3 /media/fat/hpsmem.py read 30200010 8 | tr -d ' \n'")

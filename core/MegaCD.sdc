@@ -36,3 +36,19 @@ set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].o
                     -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] -setup 2
 set_multicycle_path -from [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[1].output_counter|divclk}] \
                     -to   [get_clocks {*|pll|pll_inst|altera_pll_i|*counter[0].output_counter|divclk}] -hold 1
+
+# The 32X samples the cartridge data bus into CDI_SYNC on the clk_sys NEGEDGE, so Quartus gives the
+# whole path from an address register (the MD arbiter's MBUS_A, or an SH-2's bus controller) through
+# the cartridge module's SRAM range comparator and output mux only half a period - 9.3 ns for a path
+# that measures 8.5 ns, most of it routing on a device that is 77% full. Which side of that line a
+# build lands on is placement luck, and that is exactly the condition that used to make builds flip
+# between working and dead.
+#
+# It is not a single-cycle transfer. CDI_SYNC has exactly ONE consumer, IF.sv:895 `MD_ROM_DO <=
+# CDI_SYNC` in state RS_MD_READ, and that state cannot be reached until at least two clocks after the
+# address settles: the state machine starts from AS_N_SYNC/CE0_N_SYNC, which are themselves sampled a
+# clock later, and then passes through RS_MD_RW. The address and the cartridge data behind it are held
+# by the requester for the whole access. Allow the sample a full extra period to settle; an early
+# sample is simply never read.
+set_multicycle_path -to [get_registers {*S32X_IF*|CDI_SYNC*}] -setup 2
+set_multicycle_path -to [get_registers {*S32X_IF*|CDI_SYNC*}] -hold 1
