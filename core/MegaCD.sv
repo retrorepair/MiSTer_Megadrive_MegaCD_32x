@@ -234,7 +234,7 @@ localparam CONF_STR = {
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
 	"H2O[28],MCD PRG DTACK,Data,Early;",
-	"H2O[24],PRG Lat Thresh,Wait(>6),Hazard(>9);",
+	"H2O[24],MCD PRG Priority,Normal,Above Cart;",
 	"H2-;",
 	"R[1],Reset;",	// Main rewrites this to status[0] after calling mcd_reset(), so the core sees an
 					// ordinary full reset while the disc image is KEPT; "Reset & Eject CD" below is the
@@ -762,7 +762,7 @@ wire [23:0] MCD_DBG_A;
 // >6 clk_sys is a wait state (the /DTACK sample is 1.5 CPU clocks = 6.44 clk_sys after /AS).
 // >9 is the window early DTACK gives the SDRAM before fx68k takes its final sample, so a read past
 // that would hand the CPU the previous word. Selectable so one bitstream measures both.
-wire [7:0] DTACK_DEADLINE = status[24] ? 8'd9 : 8'd6;   // bit 27 is CD Audio (P1OR, MegaCD.sv:204) - do not reuse
+localparam [7:0] DTACK_DEADLINE = 8'd6;   // 1.5 sub-CPU clocks = 6.44 clk_sys; beyond it the 68000 inserts a wait state
 
 reg         dbg_as_d = 1, dbg_dtack_d = 1;
 reg   [7:0] dbg_lat;
@@ -823,6 +823,37 @@ always @(posedge clk_sys) begin
 end
 wire [63:0] tel_sector = {tel_sec_end, tel_cdd_send, tel_dec_frame, tel_dec_mid};
 
+// Both SH-2 program counters (tools/phase24_sh2_pc.py). Sampled over a spin loop these give the
+// address range the title is stuck in, which can then be matched against its ROM.
+wire [31:0] S32X_MSH_PC, S32X_SSH_PC;
+wire [63:0] tel_sh2pc = {S32X_MSH_PC, S32X_SSH_PC};
+
+// MD 68000 liveness and MD->32X traffic. The 68000 is the broker between the Mega CD and the 32X and
+// is the one CPU with no counter, so its state has twice had to be inferred instead of measured. Bus
+// cycles say whether it is executing at all; $A151xx accesses say whether it is still talking to the
+// 32X adapter (ADEN/RES at $A15100, the comm registers at $A15120-$A1512F).
+reg [31:0] tel_md_cycles, tel_md_32xreg;
+reg        gen_as_d = 1;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_md_cycles <= 0; tel_md_32xreg <= 0; gen_as_d <= 1;
+	end
+	else begin
+		gen_as_d <= GEN_AS_N;
+		if (gen_as_d & ~GEN_AS_N) begin
+			tel_md_cycles <= tel_md_cycles + 32'd1;
+			if (GEN_VA[23:8] == 16'hA151) tel_md_32xreg <= tel_md_32xreg + 32'd1;
+		end
+	end
+end
+wire [63:0] tel_md = {tel_md_cycles, tel_md_32xreg};
+
+// 32X comm registers and PWM status (tools/phase27_comm_regs.py). All three CPUs are alive but the
+// master<->68000 rendezvous never completes, and every register path involved is byte-identical to
+// upstream, so the values themselves are the only thing left to look at.
+wire [63:0] S32X_COMM;
+wire [63:0] tel_comm = S32X_COMM;
+
 audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the middle of sample period
 (
 	.*,
@@ -866,6 +897,9 @@ S32X #(.USE_ROM_WAIT(1)) S32X
 	.CLK(clk_sys),
 	.RST_N(~(reset | rom_download)),
 	.SH2_DIV2(status[2]),
+	.DBG_COMM(S32X_COMM),
+	.DBG_MSH_PC(S32X_MSH_PC),
+	.DBG_SSH_PC(S32X_SSH_PC),
 
 	.VCLK(GEN_VCLK_CE),
 	.VA(GEN_VA),
@@ -1043,7 +1077,10 @@ s32x_ddr s32x_ddr
 
 	.tel_audio(tel_audio),
 	.tel_mcdbus(tel_mcdbus),
-	.tel_sector(tel_sector)
+	.tel_sector(tel_sector),
+	.tel_sh2pc(tel_sh2pc),
+	.tel_md(tel_md),
+	.tel_comm(tel_comm)
 );
 
 always @(posedge clk_sys) begin
@@ -1111,7 +1148,11 @@ sdram sdram
 	.rd4(~rom_download & tmpram_req & ~bk_loading),
 	.wrl4(rom_download ? ioctl_wait : (tmpram_req & bk_loading)),
 	.wrh4(rom_download ? ioctl_wait : (tmpram_req & bk_loading)),
-	.busy4(tmpram_busy)
+	.busy4(tmpram_busy),
+
+	// See tools/phase21_prg_priority.py: lift the Mega CD PRG-RAM above the cartridge port so its
+	// read latency stops depending on what the MD 68000 and the SH-2s are doing.
+	.prg_first(status[24])
 );
 
 

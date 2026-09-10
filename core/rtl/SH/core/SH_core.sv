@@ -33,7 +33,12 @@ module SH_core
 	output            VECT_REQ,
 	input             VECT_WAIT,
 	
-	output            SLEEP
+	output            SLEEP,
+
+	// Write-back stage PC, always available. DBG_REGQ already exposes this at DBG_REGN==5'h14
+	// but only under `ifdef DEBUG; a spinning title has to be locatable without a rebuild of
+	// the world, and PIPE.WB.PC is an existing register so this costs routing and nothing else.
+	output     [31:0] DBG_PC
 	
 `ifdef DEBUG
 	                  ,
@@ -803,6 +808,8 @@ module SH_core
 	
 	assign SLEEP = SLP;
 	
+	assign DBG_PC = PIPE.WB.PC;
+
 	//Debug
 `ifdef DEBUG
 	assign ILI = ID_DECI.ILI & ~ID_STALL & ~IFID_STALL;

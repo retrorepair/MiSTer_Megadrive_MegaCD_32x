@@ -75,7 +75,10 @@ module S32X
 	output     [15:0] PWM_L,
 	output     [15:0] PWM_R,
 
-	output     [23:0] DBG_CA
+	output     [23:0] DBG_CA,
+	output     [31:0] DBG_MSH_PC,		// tools/phase24_sh2_pc.py
+	output     [31:0] DBG_SSH_PC,
+	output     [63:0] DBG_COMM			// tools/phase27_comm_regs.py
 );
 	import S32X_PKG::*;
 
@@ -194,7 +197,8 @@ module S32X
 
 		.FTOA(SHMFTOA),
 
-		.MD(6'b001000)
+		.MD(6'b001000),
+		.DBG_PC(DBG_MSH_PC)
 	);
 
 	SH7604 SSH
@@ -248,7 +252,8 @@ module S32X
 
 		.FTOA(SHSFTOA),
 
-		.MD(6'b101000)
+		.MD(6'b101000),
+		.DBG_PC(DBG_SSH_PC)
 	);
 
 
@@ -345,7 +350,8 @@ module S32X
 		.PWM_R(PWM_R),
 
 		.ROM_WAIT(ROM_WAIT),
-		.CART_EXT(CART_EXT)
+		.CART_EXT(CART_EXT),
+		.DBG_COMM(DBG_COMM)
 	);
 
 	assign CA = IF_SEL ? {2'b00,SHA[21:1]} : {VA[23:22],IF_OVA,VA[18:1]};

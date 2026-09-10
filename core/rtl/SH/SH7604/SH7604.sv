@@ -63,6 +63,8 @@ module SH7604 (
 	
 	input       [5:0] MD
 	
+	                  ,
+	output     [31:0] DBG_PC
 `ifdef DEBUG
 	                  ,
 	input       [4:0] DBG_REGN,
@@ -182,6 +184,7 @@ module SH7604 (
 	bit        SBY;
 	
 	//Internal clocks
+	bit        CLK2_CE;		// phi/2: the WDT's WTCSR.CKS=000 tap, missing until now
 	bit        CLK4_CE;
 	bit        CLK8_CE;
 	bit        CLK16_CE;
@@ -240,7 +243,8 @@ module SH7604 (
 		.VECT_REQ(VECT_REQ),
 		.VECT_WAIT(VECT_WAIT),
 		
-		.SLEEP(SLEEP)
+		.SLEEP(SLEEP),
+		.DBG_PC(DBG_PC)
 `ifdef DEBUG
 		,
 		.DBG_REGN(DBG_REGN),
@@ -552,6 +556,7 @@ module SH7604 (
 		bit [12:0] DIV_CNT;
 		
 		if (!RST_N) begin
+			CLK2_CE <= 0;
 			CLK4_CE <= 0;
 			CLK8_CE <= 0;
 			CLK16_CE <= 0;
@@ -569,6 +574,7 @@ module SH7604 (
 		else if (CE_R) begin	
 			DIV_CNT <= DIV_CNT + 13'd1;
 			
+			CLK2_CE    <= (DIV_CNT ==? 13'b????????????1);
 			CLK4_CE    <= (DIV_CNT ==? 13'b???????????11);
 			CLK8_CE    <= (DIV_CNT ==? 13'b??????????111);
 			CLK16_CE   <= (DIV_CNT ==? 13'b?????????1111);
@@ -667,7 +673,11 @@ module SH7604 (
 		
 		.WDTOVF_N(WDTOVF_N),
 		
-		.CLK2_CE(CLK8_CE),
+		// WTCSR.CKS=000 is phi/2 on the SH7604, and it is the power-on selection (WTCSR_INIT = 8'h18),
+		// so any code that sets TME without rewriting CKS lands here. This was wired to CLK8_CE
+		// because the prescaler had no divide-by-2 tap at all, making WTCNT overflow every 89.00 us
+		// instead of 22.25 us - 4x slow. CKS=001..111 were always correct.
+		.CLK2_CE(CLK2_CE),
 		.CLK64_CE(CLK64_CE),
 		.CLK128_CE(CLK128_CE),
 		.CLK256_CE(CLK256_CE),

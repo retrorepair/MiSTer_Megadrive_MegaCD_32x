@@ -37,8 +37,8 @@ def edit(rel, pairs):
 
 
 edit("MegaCD.sv", [
-    ('\t"H2O[27],PRG Lat Thresh,Wait(>6),Hazard(>9);",',
-     '\t"H2O[27],PRG Lat Thresh,Wait(>6),Hazard(>9);",\n\t"H2O[26],MCD PRG Priority,Normal,Above Cart;",'),
+    ('\t"H2O[24],PRG Lat Thresh,Wait(>6),Hazard(>9);",',
+     '\t"H2O[24],PRG Lat Thresh,Wait(>6),Hazard(>9);",\n\t"H2O[26],MCD PRG Priority,Normal,Above Cart;",'),
     ("""	.busy4(tmpram_busy)
 );""",
      """	.busy4(tmpram_busy),

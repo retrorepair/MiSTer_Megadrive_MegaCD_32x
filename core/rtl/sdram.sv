@@ -82,7 +82,13 @@ module sdram
 	input             wrh4,
 	input      [15:0] din4,
 	output     [15:0] dout4,
-	output            busy4
+	output            busy4,
+
+	// Fixed priority is 0 > 1 > 2 > 3 > 4. With prg_first the Mega CD PRG-RAM (port 2) is served
+	// ahead of the cartridge (port 0) and the BIOS ROM (port 1): the sub-CPU runs at 12.5 MHz and
+	// has 120 ns from /AS to its /DTACK sample, against 195 ns for the 7.67 MHz main CPU, so when
+	// one of them has to wait it should be the one with the slack. See tools/phase21_prg_priority.py.
+	input             prg_first
 );
 
 assign SDRAM_nCS = 0;
@@ -153,7 +159,10 @@ always @(posedge clk) begin
 			dqm <= 0;
 			state <= STATE_START;
 		end
-		else if ((~old_rd[0] && rd[0]) || (~old_wr[0] && wr[0])) begin
+		// Step over the cartridge port when the Mega CD PRG-RAM has a request waiting and
+		// prg_first is set - that is all it takes to reorder a fixed-priority else-if chain.
+		else if (((~old_rd[0] && rd[0]) || (~old_wr[0] && wr[0]))
+		         && !(prg_first && ((~old_rd[2] && rd[2]) || (~old_wr[2] && wr[2])))) begin
 			old_rd[0] <= rd[0];
 			old_wr[0] <= wr[0];
 			{ba, a} <= addr0;
@@ -164,7 +173,8 @@ always @(posedge clk) begin
 			state <= STATE_START;
 			ram_req[0] <= 1;
 		end
-		else if ((~old_rd[1] && rd[1]) || (~old_wr[1] && wr[1])) begin
+		else if (((~old_rd[1] && rd[1]) || (~old_wr[1] && wr[1]))
+		         && !(prg_first && ((~old_rd[2] && rd[2]) || (~old_wr[2] && wr[2])))) begin
 			old_rd[1] <= rd[1];
 			old_wr[1] <= wr[1];
 			{ba, a} <= addr1;

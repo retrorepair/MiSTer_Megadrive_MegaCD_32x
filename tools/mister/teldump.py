@@ -29,7 +29,8 @@ def beat(off):
 
 
 def sample():
-    return {"hdr": beat(0x00), "aud": beat(0x08), "bus": beat(0x10), "sec": beat(0x18)}
+    return {"hdr": beat(0x00), "aud": beat(0x08), "bus": beat(0x10), "sec": beat(0x18),
+            "pc": beat(0x20), "md": beat(0x28)}
 
 
 def show(s):
@@ -51,6 +52,11 @@ def show(s):
     c = s["sec"]
     print("sectors: SECTOR_END %d  CDD_SEND %d  DEC_FRAME %d  DEC_MID %d"
           % (c >> 48, (c >> 32) & 0xFFFF, (c >> 16) & 0xFFFF, c & 0xFFFF))
+
+    p = s["pc"]
+    print("SH-2 PC: master %08X  slave %08X" % (p >> 32, p & 0xFFFFFFFF))
+    m = s["md"]
+    print("MD 68000: bus cycles %d   $A151xx accesses %d" % (m >> 32, m & 0xFFFFFFFF))
 
 
 def main():

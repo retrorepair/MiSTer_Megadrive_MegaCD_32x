@@ -1474,3 +1474,75 @@ that port for `WTCSR.CKS=000`, which the SH7604 defines as phi/2; the prescaler
 at phi/8 and the 8-bit WTCNT overflows every 89.00 us instead of 22.25 us - **4x slow**. `CKS=001..111`
 are all correct, and `WTCSR_INIT = 8'h18` (`SH7604_PKG.sv:332`) selects `CKS=000` at power-on, so any
 code enabling TME without rewriting CKS lands on the broken tap. Both SH-2s carry it.
+
+## Doom CD32X Fusion: located to a three-way rendezvous that never completes
+
+### It was region-locked, not crashing
+First frame of a Fusion boot is `ERROR! THIS IS A PAL/SECAM-COMPATIBLE MEGA-CD AND WILL NOT OPERATE`.
+Main auto-loads the EU `boot.rom`, so a US title refuses. Fixed for testing by copying
+`games/MegaCD/USA/cd_bios.rom` next to the Fusion files (the per-game override). Everything below is
+with that in place. **Screenshot the first few seconds of a boot before theorising about a crash.**
+
+### The tower itself is fine
+Night Trap (CD32X) runs perfectly on the same build: 10 distinct frames, `sdr_rd`/`sdr_wr`/`fbd_wr`
+all advancing, SECTOR_END 75.0/s. So Mega CD -> 68000 -> 32X works. Fusion is specific.
+
+### All three CPUs are alive; none of them progress
+Measured with the r13 telemetry (SH-2 PCs, 68000 bus cycles, `$A151xx` accesses):
+
+```
+master SH-2   0201DD5A..0201DD60   6-byte spin loop in Fusion's cart ROM  (150/150 samples)
+slave  SH-2   0201E5CE..0201E5DE   16-byte spin loop in cart ROM
+68000         63.0M -> 82.9M bus cycles, $A151xx 1.08M -> 1.38M   ALIVE, ~27k reg accesses/s
+sub-CPU       ~1.9M PRG-RAM reads/s                                ALIVE
+fbd_wr        202 -> 202                                           frozen: nothing is drawn
+```
+
+Disassembled out of the ROM itself (`tools/dis_sh2.py`, capstone SH-2):
+
+```
+MASTER  0201DD58  mov.l 0x201de7c,r7    ; literal at ROM 0x1DE7C = 0x20004024
+        0201DD5A  mov.w @r7,r13
+        0201DD5C  tst   r13,r13
+        0201DD5E  bf    0x201dd5a        -> spin while COMM register NON-ZERO
+
+SLAVE   0201E5CE  mov.w @r8,r2
+        0201E5D0  cmp/pz r2
+        0201E5D2  bf    0x201e5ce        -> spin while bit 15 SET
+        0201E5D6  mov.w r10,@r8          -> then push a value
+```
+
+`0x20004024` is the SH-2 view of the 32X comm register at MD `$A15124`. **NOTE the numbering trap:**
+d32xr names comm registers by BYTE OFFSET, so its COMM0/COMM2/COMM4 are `$A15120`/`$A15122`/`$A15124`
+= our `CP0R`/`CP1R`/**`CP2R`** (offset 6'h24). `CP4R` is offset 6'h28, a different register.
+
+The 68000 side (d32xr `src-md/crt0.s`, `main_loop_handle_req`) polls `$A15120` for a master request
+and `$A15124` for a secondary one, services it, and writes 0 back. It is demonstrably in that loop
+(~27k `$A151xx` accesses/s). So the master posts a request and the 68000 never clears it, or never
+sees it. The slave's "wait for bit 15, then push" is the shape of the PWM FIFO FULL flag, and
+`IF.sv:695` only drains that FIFO while `PWMCR.LMD || PWMCR.RMD` - if it never drains, FULL sticks
+and the slave spins for ever.
+
+### What has been cleared by diffing against pristine upstream `32X/IF.sv`
+`CP0R..CP7R` both directions, the whole PWM block, `DCR.RV`, `BSR` banking, `ICR`/CMD interrupt
+generation, and the MD register write decode are **byte-identical**. This is not a transcription
+error, so reading the register VALUES is the only way forward - `tools/phase27_comm_regs.py` adds
+beat 6 with `{CP0R, CP1R, CP2R, LPWR.FULL, LPWR.EMPTY, RPWR.FULL, RPWR.EMPTY, PWMCR[11:0]}`.
+
+### Fusion's Mode 1 contract, from src-md/scd.c - worth keeping
+```c
+write_word(0xA12002, 0xFF00); write_byte(0xA12001, 0x03/0x02/0x00);  // gate array reset sequence
+write_byte(0xA12001, 0x02); while (!(read_byte(0xA12001) & 2)) ...   // reset sub-CPU, wait SBRQ
+write_word(0xA12002, 0x0002);                                        // bank 0, 2M, WordRAM to sub
+memset((char *)0x420000, 0, 0x20000);                                // clear PRG-RAM, mode-1 window
+Kos_Decomp((uint8_t *)bios, (uint8_t *)0x420000);                    // sub BIOS out of the CD BIOS
+memcpy((char *)0x426000, &Sub_Start, ...);                           // its own sub-CPU program
+write_byte(0xA12001, 0x01); while (!(read_byte(0xA12001) & 1)) ...   // start sub-CPU, wait SRES
+while (read_byte(0xA1200F) != 'I') ...                               // sub program alive (timeout)
+while (read_byte(0xA1200F) != 0x00) ;                                // ready  (NO timeout)
+```
+It also uses **Word RAM in 1M mode** (`char *scdfn = (char *)0x600000; write_long(0xA12010,0x0C0000);`)
+and its own sub-CPU program is incbin'd in the cart ROM (`src-md/cd.s`), so the 68000 uploads and
+starts it - full Mode 1. jgenesis does NOT support CD32X at all (jsgroth, issues #148/#673), so there
+is no reference implementation for this combination; issue #701 is Fusion-specific and was filed by
+the d32xr author.

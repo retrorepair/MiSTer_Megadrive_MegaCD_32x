@@ -82,7 +82,8 @@ module S32X_IF
 	output            MD_CP_READ,
 	output            MD_CP_WRITE,
 	output            SH_CP_READ,
-	output            SH_CP_WRITE
+	output            SH_CP_WRITE,
+	output     [63:0] DBG_COMM		// tools/phase27_comm_regs.py
 );
 	import S32X_PKG::*;
 
@@ -1069,6 +1070,9 @@ module S32X_IF
 	end
 
 	assign CDO = VDI_SYNC;
+	assign DBG_COMM = {CP0R, CP1R, CP2R,
+	                   LPWR.FULL, LPWR.EMPTY, RPWR.FULL, RPWR.EMPTY, PWMCR[11:0]};
+
 	assign CASEL_N = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_CE0 : ASEL_N_SYNC;
 	assign CLWR_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_LWR : LWR_N_SYNC[0];
 	assign CUWR_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_UWR : UWR_N_SYNC[0];
