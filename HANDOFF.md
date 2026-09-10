@@ -993,3 +993,23 @@ distinct.
 exactly like a core regression until you load the same MGL on the previous build and see it too. Restore
 the file afterwards. And do not run `git stash -u` or switch branches while a background test is writing
 screenshots into an untracked directory; it took the directory with it mid-sweep.
+
+### Fault-frame probe: inconclusive, and why
+The phase9 build captures the last eight 68000 write-data words, frozen when the 68000 reads the
+bus/address-error vector. Across three runs it did not isolate the exception frame:
+
+| Run | last vector fetched | ring contents |
+|---|---|---|
+| 1 | $00002E (line F) | ordinary writes |
+| 2 | $00000E (**address error**) | does not parse as a frame |
+| 3 | $00002E (line F) | ordinary writes |
+
+Two faults are wrong with the probe. The freeze only fires on $000008-$00000F, but two of three runs
+ended on the line-F vector at $00002C, so the ring kept rolling. And the values it did capture are the
+program's own traffic - the same four words `0040 2010 C000 2022` appear in every run, which is a VDP
+control-port address-set long, not a stack frame.
+
+Next version should freeze on ANY vector fetch in $000008-$0000FF (the reset vectors at $000000/$000004
+excepted), and should record the write ADDRESS beside the data so a stack push is distinguishable from a
+register write. The finding that stands is unchanged: an address error is taken, confirmed again here by
+run 2's vector fetch.
