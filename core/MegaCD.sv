@@ -503,8 +503,13 @@ gen gen
 	.SERJOYSTICK_OUT(SERJOYSTICK_OUT),
 	.SER_OPT(SER_OPT),
 
-	.MEM_RDY(1'b0),        // every 000000-7FFFFF access is external here (cartridge or Mega CD) and ends on DTACK;
-	                       // MEM_RDY would end the arbiter's ROM read as soon as the SDRAM is idle, before the data is back
+	// MEM_RDY terminates an arbiter ROM cycle without waiting for an external /DTACK. That must NOT happen
+	// for the Mega CD windows - self-terminating them returns the gate array's data before it is driven,
+	// which was the original corrupt-BIOS bug - but it IS what srg320's S32X core does for cartridge
+	// cycles, and mcd-verificator hangs at "System init..." on this core where it runs on the previous
+	// MD+MCD core. So qualify it by address: cartridge space self-terminates on the cartridge SDRAM port,
+	// everything else still waits for /DTACK.
+	.MEM_RDY(cart_space & ~CART_MEM_BUSY),
 
 	.GG_RESET(1'b0),
 	.GG_EN(1'b0),
@@ -736,6 +741,9 @@ audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the midd
 // Cartridge slot: the 32X, with the game cartridge (cart.sv) behind it on the 32X's pass-through bus
 
 wire        CART_CART_N = ~rom_cart_mode;   // a cartridge in the slot grounds /CART (the 32X passes the pin through)
+// /CE0 with a cartridge actually present. With an empty slot /CE0 covers $400000-$7FFFFF, which is where
+// the Mega CD lives, so this must be false then or the Mega CD would self-terminate.
+wire        cart_space = ~GEN_CE0_N & rom_cart_mode;
 wire        CART_EN = status[3];            // "Backup RAM: Internal+Cart": also save/load the cartridge SRAM region
 wire        EN_32X_PWM = ~status[63] | ~dbg_menu;
 wire        YS_N, EDCLK;
