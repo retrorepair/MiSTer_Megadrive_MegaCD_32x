@@ -11,7 +11,7 @@ the Mega CD streaming video into Word RAM while the 32X's two SH-2s blit it to a
 project takes the Mega CD block from one, the 32X and SH-2 blocks from the other, puts them on a single
 Mega Drive, and makes the whole thing fit in one Cyclone V.
 
-**Current release:** `releases/MegaCD_MD_MCD_32X_r3.rbf`. Timing closes with margin, and every tier
+**Current release:** `releases/MegaCD_MD_MCD_32X_r7.rbf`. Timing closes with margin, every tier
 runs on real hardware. It is not finished — see [Status](#status) and [Known gaps](#known-gaps) for an
 honest account of what has and has not been demonstrated.
 
@@ -170,7 +170,7 @@ CEGen-produced 50 MHz enable, rather than upstream's 13.42 MHz which was 7.4% fa
   pixel and the pixels just in time; here both are read during the preceding HBLANK, about 10 µs early.
   This is a hardware limitation of external memory latency and is commented as such in the RTL. Only
   software racing the beam within a single line could tell.
-- **mcd-verificator does not run.** See [Known gaps](#known-gaps).
+- **mcd-verificator completes with 4 of 18 tests failing.** See [Known gaps](#known-gaps).
 
 ---
 
@@ -198,7 +198,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | Port PCM wave RAM into SDRAM | **Done** — saved ~64 M10K |
 | Port the CDC `SECTOR_ACTIVE` / frame-timer fixes | **Done** |
 | Port the ASIC INT2 acknowledge fix | **Done** |
-| Re-run the verificator to get an fpgagen baseline | **Not done** — it does not reach its first result line |
+| Re-run the verificator to get an fpgagen baseline | **Done** — 14 of 18 pass on r7 |
 
 ### Phase 2 — Mega Drive + 32X
 
@@ -237,7 +237,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | Long soak | **Partial** — longest single run 12 minutes; no multi-hour soak |
 | DDR3 telemetry technique for live state | **Done** — and it found three of the hard bugs |
 | 32X test ROMs (SH-2 timing, PWM) | **Not done** |
-| Verificator for the MD/MCD side | **Open** — traced to a 68000 address error, root cause not yet found |
+| Verificator for the MD/MCD side | **Runs** — 14 of 18 pass; 3 failures are the accepted fpgagen cost, 1 (CDC flags) is open |
 | Audio verified by listening | **Done** — confirmed correct by ear across the tiers heard |
 | Backup RAM / SRAM save and load tested | **Not done** |
 
@@ -258,12 +258,10 @@ has no such signal.
 
 Read this before trusting the core with anything important.
 
-- **mcd-verificator hangs at "System init…".** This is a regression of this merge, not an upstream
-  limitation: the previous NukedMD-based Mega CD core runs the same cartridge and disc to a full
-  results page. It has been traced with a bus probe: the Mega CD *is* detected at `$400000` and the
-  sub-CPU program upload runs, then the 68000 takes an **address error**, whose ROM handler is a bare
-  `rte` that cannot unwind the 68000's 14-byte fault frame, so the program counter is lost. The odd
-  address that triggers it has not yet been identified. No released game has shown this.
+- **mcd-verificator now completes, with 4 of 18 tests failing.** It hung at "System init…" from the
+  start of this project until r7. Variable tests and register $8030 probe cycle-exact 68000 behaviour
+  and are the accepted cost of fpgagen; the IRQ test fails on the NukedMD reference core too. **CDC
+  flags is the one worth chasing**, since it is not a CPU-accuracy test.
 - **Doom CD32X Fusion does not boot.** The first real title found that drives the Mega CD from a
   cartridge, which is "mode 1" — the same path mcd-verificator fails on, so the two are very likely one
   defect. Its CD init times out after about 2.6 seconds and carries on as though no disc were present,
