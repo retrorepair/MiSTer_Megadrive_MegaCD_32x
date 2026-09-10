@@ -92,6 +92,7 @@ module gen
 	output        VBL,
 	output        CE_PIX,
 	input         BORDER,
+	input         CRAM_DOTS,
 
 	output        INTERLACE,
 	output        FIELD,
@@ -534,6 +535,7 @@ VDP vdp
 	.VBL(VBL),
 	
 	.BORDER_EN(BORDER),
+	.CRAM_DOTS(CRAM_DOTS),
 	.VSCROLL_BUG(0),
 	.OBJ_MAX(OBJ_LIMIT_HIGH),
 	

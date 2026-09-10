@@ -53,6 +53,7 @@ module VDP
 	output            VS_N,
 		
 	input             BORDER_EN,
+	input             CRAM_DOTS,	// real hardware shows the value being written to CRAM as a dot
 	input             VSCROLL_BUG, //'1';
 	input             OBJ_MAX,
 		
@@ -1843,7 +1844,9 @@ module VDP
 					PIX_MODE_PIPE[1] <= PIX_NORMAL;
 					BACK_COL_PIPE[1] <= 0;
 				end else begin
-					PIX_COL_PIPE[0] <= CRAM_Q_A;
+					// CRAM dots: a colour-RAM write during active display puts the written value on
+					// screen for that pixel on real hardware. Mirrors vdp.vhd:838. Off by default.
+					PIX_COL_PIPE[0] <= (CRAM_DOTS && CRAM_WE) ? CRAM_D : CRAM_Q_A;
 					PIX_MODE_PIPE[1] <= PIX_MODE_PIPE[0];
 					BACK_COL_PIPE[1] <= BACK_COL_PIPE[0];
 				end
