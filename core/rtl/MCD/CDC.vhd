@@ -32,7 +32,12 @@ entity CDC is
 		RAM_A_RD   	: out std_logic_vector(15 downto 0);
 		RAM_DI		: in std_logic_vector(7 downto 0);
 		RAM_DO		: out std_logic_vector(15 downto 0);
-		RAM_WE		: out std_logic
+		RAM_WE		: out std_logic;
+
+		-- single-cycle pulses, counted in the top level (tools/phase19_sector_rate.py)
+		DBG_SECTOR_END	: out std_logic;
+		DBG_DEC_FRAME	: out std_logic;
+		DBG_DEC_MID		: out std_logic
 	);
 end CDC;
 
@@ -528,6 +533,10 @@ begin
 	end process;
 
 	RAM_WE <= DEC_WR and DEC_WR_EN and CTRL0(DECEN);
+
+	DBG_SECTOR_END <= SECTOR_END;
+	DBG_DEC_FRAME  <= DEC_FRAME;
+	DBG_DEC_MID    <= DEC_MID;
 
 	process( RESET_N, CLK )
 	begin

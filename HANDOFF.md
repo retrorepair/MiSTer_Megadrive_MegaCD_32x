@@ -1239,3 +1239,187 @@ through the same `hps_ext` path. So the request pacing is right and the sectors 
 counters) to tell delivery from pacing. Noted in passing: `S32X_VDP`'s `LP_REQ` is unconditional
 (`assign LP_REQ = DOT_CE && H_CNT == 9'h1D0`), so the 32X DDR3 line prefetch runs every scanline even
 with no 32X cartridge.
+
+### CORRECTION: d4 is 47, not 87 - the sector-period conclusion above is withdrawn
+
+The 87 came from the pre-compaction session summary and was never verified against a screenshot in
+this session. Four controlled runs (two on r7/P7, two on r8/P8, identical MGL and procedure) all give
+**d4 = 47**. With the verified d5 = 69:
+
+| | d4 asserted | d5 cleared | duty |
+|---|---|---|---|
+| hardware / b66 | 48-50 | 71-73 | 40.5% |
+| ours | 47 | 69 | **40.5%** |
+
+47/49 = 0.959 and 69/72 = 0.958: **both phases are short by the same factor.** The duty cycle is
+exactly right, so the decoder flag waveform is correct, DEC_MID fires where it should, and there is
+no sector-rate problem. Everything above about P ~ 18 ms and a 55 Hz drive is wrong - it was built on
+the unverified 87. `tools/phase19_sector_rate.py` still gets built because the counters are cheap and
+confirm the drive directly, but it is no longer the lead.
+
+What the numbers actually say is a **uniform ~4% deficit in the main<->sub RPC loop rate against the
+Mega CD's 75 Hz frame**, while REG 8030 (a main-CPU loop against the same CD timer) is only 0.23% low
+at 1283 against 1286-1288. Main CPU vs CD timebase is therefore nearly exact and the ~4% sits on the
+sub-CPU side - its clock, or the INT2/RPC path, or PRG-RAM wait states.
+
+**IRQ TEST now reports error 0A, which is exactly what the b66 reference reports** - b66 fails that
+one test and nothing else. So on IRQ TEST we are level with the reference.
+
+The earlier "IRQ TEST 227 error 09 with a disc, 127 error 06" readings were a one-off state on the
+first load after a core switch; the controlled runs give error 0A on both builds. Run-to-run variance
+on VAR TESTS is real but small (26069, 26072, 26073, 26083).
+
+### Sub-CPU PRG-RAM /AS-to-/DTACK, measured (telemetry beat 3, build r8)
+
+```
+min 5 clk_sys (93 ns)   max 18 clk_sys (335 ns)   over-deadline SATURATED   n = 55.6M
+```
+
+The deadline is 6.44 clk_sys (120 ns, /AS at the start of S2 to the /DTACK sample at the end of S4).
+The minimum matches the reference core's own "measured 93-105 ns AS to DTACK" exactly, so the typical
+access does make it; the 335 ns tail does not, and those cost a wait state. **`tel_lat_slow` is 16 bits
+and saturates within about a second at 1.85M PRG-RAM reads/s, so the fraction is still unknown - widen
+it to 32 bits in the next probe.**
+
+The early-DTACK A/B could not be completed on r8: bit 28 is gated `status[28] & dbg_menu` there and
+dbg_menu needs Enter+Esc held together (`tools/mister/kbd_chord.py` was written for this), but there is
+no way to confirm from the screen that the toggle landed. The p19 build ungates it.
+
+## The reference core's early PRG-RAM DTACK fixes VAR TESTS - A/B'd on hardware, r9
+
+OSD debug bit 28 switches the sub-CPU's PRG-RAM acknowledge between waiting for the data (today's
+default, upstream) and acknowledging when the SDRAM accepts the request (the reference core's timing).
+Four alternating runs, same MGL, same disc:
+
+| bit 28 | VAR TESTS | IRQ TEST | REG 8030 | CDC FLAGS |
+|---|---|---|---|---|
+| 0 - ack on data | 26069/26085 **ERROR 02** | ERROR 0A | 1282/1283 | 47 ERROR 40 |
+| 1 - **early ack** | **OK** | **227** ERROR 09 | 1281/1282 | 47 ERROR 40 |
+
+Reproduced 2/2 each way. Nothing regresses: PROG RAM, WORD RAM, WRAM PMOD, CDC INIT and CDC DMA2/3/1
+all still pass. jsgroth's expected range for the IRQ counting sub-test is 224-226, so 227 is one over.
+**15 of 18.**
+
+This is the reference core's own comment vindicated - "acknowledging only once the data was back cost
+the die-accurate CPU a wait state on nearly every PRG-RAM fetch ... where the real PRG-RAM answers with
+none (mcd-verificator VAR test)".
+
+### Why it is NOT yet the default
+
+Early DTACK acknowledges before the data lands, so S68K_PRGRAM_DO is stale until the SDRAM answers.
+The reference core assumes "a fixed ~60 ns"; here it is not fixed, and phase18's telemetry measured it:
+
+```
+sub-CPU PRG-RAM /AS -> /DTACK:  min 5 clk_sys (93 ns)   max 15-18 clk_sys (279-335 ns)
+```
+
+`sdram.sv` serves five ports at fixed priority with the Mega CD PRG-RAM on port 2, below the cartridge
+port the MD 68000 and both SH-2s share; the reference core has no 32X. With early DTACK the CPU latches
+about 4-5 clk_sys after the acknowledge, so any read past that window hands it the previous word. At
+1.85M PRG-RAM reads/s even 1e-6 is a couple of silent corruptions a second - the same class of bug as
+the SDRAM settling fault that used to make builds flip between working and dead.
+
+The observed maximum proves late reads happen. What is unknown is how often, because phase18's
+over-deadline counter was 16 bits and saturated within a second. `tools/phase20_dtack_ratio.py` widens
+both counters to 32 bits and makes the threshold selectable with OSD bit 27: >6 clk_sys is "cost a wait
+state" (why the sub-CPU runs slow today), >9 is "would be corrupted by early DTACK". One bitstream
+answers both. A title soak with bit 28 set is running alongside.
+
+### Drive timing is not a problem - measured, r9 telemetry, during a running CD game
+
+```
+DEC_MID 75.1/s     DEC_FRAME 52.5/s     SECTOR_END 35.7/s     CDD_SEND 99.9/s
+```
+
+`DEC_MID` at 75.1/s confirms the Mega CD's own 75 Hz timebase is exact, so the denominator of the
+CDC FLAGS measurement is sound and the earlier sector-rate theory is dead. DEC_FRAME below DEC_MID is
+by design: SECTOR_END zeroes FRAME_CNT, and 75.1 - 52.5 = 22.6 lost frames against 35.7 sectors/s is
+just SECTOR_END landing uniformly inside the 60% window. CDD_SEND at 99.9/s is above the hardware 75 Hz
+because `ASIC.vhd` also hands the command registers over on every write to FF804A and resets the frame
+counter; b66 has the identical ASIC, so it is not what separates us, but it is a deviation worth noting.
+
+Beware measuring rates with `teldump.py`: each beat spawns python3 on the ARM, and timing the interval
+by the sleep rather than the clock inflated CDD_SEND to 85.8/s. It now times the interval itself.
+
+## Early DTACK measured: it fixes VAR TESTS by corrupting memory. Do not ship it.
+
+phase20 widened the over-deadline counter to 32 bits (phase18's 16-bit one saturated within a second
+at 2.2M PRG-RAM reads/s, so every earlier reading was a useless 0xFFFF) and made the threshold
+selectable. Measured on r10 during a running Mega CD game, with bit 28 = 0 so the latency is the TRUE
+SDRAM latency rather than the early acknowledge:
+
+| threshold | meaning | result |
+|---|---|---|
+| > 6 clk_sys | costs the sub-CPU a wait state today | **1.38%** of reads (~30k/s) |
+| > 9 clk_sys | would be CORRUPTED by early DTACK | **0.011 - 0.068%** of reads |
+
+At 2.19M PRG-RAM reads/s that second figure is **250 to 1500 silently wrong data words per second**
+handed to the sub-CPU. Early DTACK buys mcd-verificator VAR TESTS at the price of random memory
+corruption, so it stays behind OSD bit 28 and is never the default.
+
+The wait-state figure also kills the tidy explanation: 1.38% of reads losing 2 CPU clocks each is
+~0.48% of sub-CPU time, well short of the 2-4% by which the CDC FLAGS poll loop runs slow. Wait
+states are part of it, not all of it.
+
+`tools/phase21_prg_priority.py` is the version worth building: leave the acknowledge on the data,
+where it can never be stale, and remove the contention instead by lifting the Mega CD PRG-RAM port
+above the cartridge port in `sdram.sv` (OSD bit 26). That is also the better hardware match - PRG-RAM
+and the cartridge are separate memories that cannot stall each other on a real machine, and when a
+shared controller must choose, the 12.5 MHz sub-CPU has 120 ns of slack against the 7.67 MHz main
+CPU's 195 ns. Verified to apply cleanly against a scratch copy; note `old_rd`/`old_wr` are declared
+INSIDE the always block, so the port-2 test has to be written out in each guard, not hoisted to a wire.
+
+### Trap: status[27] is CD Audio. Do not reuse it.
+phase20 first put the threshold switch on bit 27, which collides with `"P1OR,CD Audio"` (MegaCD.sv:204;
+'R'-'A'+10 = 27), live audio routing at MegaCD.sv:713-716. Moved to bit 24. The two ratio readings
+above were taken with CD audio rerouted - audio only, so the latency numbers stand. **Check every new
+OSD bit against the letter-form entries (`O<char>` = bit 'char'-'A'+10), not just the `O[n]` ones.**
+
+## The 32X SH-2s wedge - a real bug, and it is NOT any of the first four theories
+
+Knuckles' Chaotix (32X cartridge, no disc) runs and then hangs: static picture, no PWM. Counters read
+three times at 3 s intervals during the hang:
+
+```
+tel_seq    (telemetry heartbeat)        17F7 -> 1D0F -> 2228   ADVANCING
+tel_lp     (display line prefetches)      B2 ->   EA ->   49   ADVANCING
+tel_sdr_rd (SH-2 work-RAM reads)          42 ->   42 ->   42   FROZEN
+tel_sdr_wr (SH-2 work-RAM writes)         3B ->   3B ->   3B   FROZEN
+tel_fbd_wr (32X frame-buffer draws)       CA ->   CA ->   CA   FROZEN
+```
+
+**Both SH-2s have stopped touching memory. The DDR3 engine is healthy** - still servicing line
+prefetches and returning to idle. No PWM follows because the SH-2s generate it.
+
+Soak results (`tools/mister/soakfreeze.sh`, and `tools/mister/sh2watch.sh` which watches these counters
+instead of frames - frames are a poor detector because an attract loop legitimately repeats one):
+
+| build | result |
+|---|---|
+| r7 (before this session) | 6 min clean, then 10 min clean, 23 distinct frames |
+| r9 | 6 min clean; froze once during a sweep, elapsed time unknown |
+| r10 | **wedged at 90-135 s** (soak samples 2 -> 3) |
+
+Leans regression but is not proven: time-to-failure varies. A reliable repro is the next step.
+The user confirms it also hangs during REAL GAMEPLAY, so it is not an artefact of attract-mode testing.
+
+### What has been positively cleared
+- **Not the early DTACK.** Chaotix, Doom and VRDX all run with bit 28 both ways; and beat 3 reads all
+  zero during 32X cartridge titles, i.e. the sub-CPU does no PRG-RAM reads at all, so that path is
+  inert here.
+- **Not MiSTer's screensaver.** `video_off=0` in MiSTer.ini.
+- **Not the telemetry arbiter branch** (my own theory, refuted by a 17-agent audit). It runs only from
+  S_IDLE, never interrupts a burst, costs <=8 clocks once per 2^17, and `lp_pend`/`fbd_rd_pend`/
+  `sdr_*_pend` are held levels serviced on the next S_IDLE, so nothing is dropped.
+- **Not EN_32X_VID blanking.** That would leave the SH-2s drawing behind a blank screen; these
+  counters are frozen solid.
+- `core/rtl/S32X/` is byte-identical r7..HEAD - no 32X datapath logic changed this session.
+
+### Corrections to earlier entries in this file
+Three conclusions recorded above were overturned by later measurement. Do not act on them:
+1. **The sector-rate theory is wrong.** It rested on d4 = 87 taken from a session summary and never
+   verified; the measured value is 47. Duty cycle is exactly 40.5% and DEC_MID runs at 75.1/s.
+2. **"Disc activity breaks the timing tests" is wrong.** The 227/error-09 and 127/error-06 readings
+   were a one-off state on the first load after a core switch; controlled runs give error 0A.
+3. **"The 68000 is alive during the hang" is unsupported.** `tel_lp` comes from free-running video
+   timing (`VDP.sv:455`), not from any CPU, and the YM2612 sustains its last register state.

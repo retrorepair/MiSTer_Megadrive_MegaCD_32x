@@ -234,6 +234,7 @@ localparam CONF_STR = {
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
 	"H2O[28],MCD PRG DTACK,Data,Early;",
+	"H2O[24],PRG Lat Thresh,Wait(>6),Hazard(>9);",
 	"H2-;",
 	"R[1],Reset;",	// Main rewrites this to status[0] after calling mcd_reset(), so the core sees an
 					// ordinary full reset while the disc image is KEPT; "Reset & Eject CD" below is the
@@ -627,7 +628,11 @@ MCD MCD
 	.PRG_WRH_N(MCD_PRG_WRH_N),
 	.PRG_OE_N(MCD_PRG_OE_N),
 	.PRG_RDY(~MCD_PRG_BUSY),
-	.DBG_EARLY_DTACK(status[28] & dbg_menu),
+	.DBG_EARLY_DTACK(status[28]),   // ungated: the A/B is driven by writing MegaCD.CFG, which cannot reach dbg_menu
+
+	.DBG_SECTOR_END(MCD_DBG_SECTOR_END),
+	.DBG_DEC_FRAME(MCD_DBG_DEC_FRAME),
+	.DBG_DEC_MID(MCD_DBG_DEC_MID),
 
 	.DBG_S68K_AS_N(MCD_DBG_AS_N),
 	.DBG_S68K_DTACK_N(MCD_DBG_DTACK_N),
@@ -754,13 +759,16 @@ wire [63:0] tel_audio = {tel_pk_gen, tel_pk_mcd, tel_pk_pwm, tel_pk_out, tel_aud
 wire        MCD_DBG_AS_N, MCD_DBG_DTACK_N, MCD_DBG_RNW;
 wire [23:0] MCD_DBG_A;
 
-localparam [7:0] DTACK_DEADLINE = 8'd6;
+// >6 clk_sys is a wait state (the /DTACK sample is 1.5 CPU clocks = 6.44 clk_sys after /AS).
+// >9 is the window early DTACK gives the SDRAM before fx68k takes its final sample, so a read past
+// that would hand the CPU the previous word. Selectable so one bitstream measures both.
+wire [7:0] DTACK_DEADLINE = status[24] ? 8'd9 : 8'd6;   // bit 27 is CD Audio (P1OR, MegaCD.sv:204) - do not reuse
 
 reg         dbg_as_d = 1, dbg_dtack_d = 1;
 reg   [7:0] dbg_lat;
 reg         dbg_arm;
 reg   [7:0] tel_lat_min, tel_lat_max;
-reg  [15:0] tel_lat_slow;
+reg  [31:0] tel_lat_slow;   // 16 bits saturated in ~1 s at 1.85M reads/s (tools/phase20_dtack_ratio.py)
 reg  [31:0] tel_lat_n;
 
 always @(posedge clk_sys) begin
@@ -783,13 +791,37 @@ always @(posedge clk_sys) begin
 		if (dbg_arm & dbg_dtack_d & ~MCD_DBG_DTACK_N) begin
 			dbg_arm      <= 0;
 			tel_lat_n    <= tel_lat_n + 32'd1;
-			if (dbg_lat > DTACK_DEADLINE && ~&tel_lat_slow) tel_lat_slow <= tel_lat_slow + 16'd1;
+			if (dbg_lat > DTACK_DEADLINE) tel_lat_slow <= tel_lat_slow + 32'd1;
 			if (dbg_lat < tel_lat_min) tel_lat_min <= dbg_lat;
 			if (dbg_lat > tel_lat_max) tel_lat_max <= dbg_lat;
 		end
 	end
 end
-wire [63:0] tel_mcdbus = {tel_lat_min, tel_lat_max, tel_lat_slow, tel_lat_n};
+// min/max are known and stable across runs (5 and 15-18 clk_sys); the ratio is what was missing.
+wire [63:0] tel_mcdbus = {tel_lat_slow, tel_lat_n};
+
+// Drive sector rate against the gate array's 75 Hz frame request (tools/phase19_sector_rate.py).
+// CDD_SEND is the gate array asking the drive for a frame; SECTOR_END is the CDC finishing a whole
+// 2352-byte sector. On hardware both are 75/s. Counting them separately says whether the request
+// pacing or the delivery is what stretches the decoder flag's period to ~18 ms.
+wire MCD_DBG_SECTOR_END, MCD_DBG_DEC_FRAME, MCD_DBG_DEC_MID;
+
+reg [15:0] tel_sec_end, tel_cdd_send, tel_dec_frame, tel_dec_mid;
+reg        tel_cdd_send_d;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_sec_end <= 0; tel_cdd_send <= 0; tel_dec_frame <= 0; tel_dec_mid <= 0;
+		tel_cdd_send_d <= 0;
+	end
+	else begin
+		tel_cdd_send_d <= scd_cdd_send;
+		if (MCD_DBG_SECTOR_END)              tel_sec_end   <= tel_sec_end   + 16'd1;
+		if (scd_cdd_send & ~tel_cdd_send_d)  tel_cdd_send  <= tel_cdd_send  + 16'd1;
+		if (MCD_DBG_DEC_FRAME)               tel_dec_frame <= tel_dec_frame + 16'd1;
+		if (MCD_DBG_DEC_MID)                 tel_dec_mid   <= tel_dec_mid   + 16'd1;
+	end
+end
+wire [63:0] tel_sector = {tel_sec_end, tel_cdd_send, tel_dec_frame, tel_dec_mid};
 
 audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the middle of sample period
 (
@@ -1010,7 +1042,8 @@ s32x_ddr s32x_ddr
 	.lb_q(S32X_LB_Q),
 
 	.tel_audio(tel_audio),
-	.tel_mcdbus(tel_mcdbus)
+	.tel_mcdbus(tel_mcdbus),
+	.tel_sector(tel_sector)
 );
 
 always @(posedge clk_sys) begin

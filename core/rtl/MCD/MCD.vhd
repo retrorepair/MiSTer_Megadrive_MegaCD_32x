@@ -35,6 +35,9 @@ entity MCD is
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
 		DBG_EARLY_DTACK: in std_logic := '0';
+		DBG_SECTOR_END	: out std_logic;
+		DBG_DEC_FRAME	: out std_logic;
+		DBG_DEC_MID		: out std_logic;
 		
 		ROM_DI			: in std_logic_vector(15 downto 0);
 		ROM_CE_N			: out std_logic;
@@ -349,6 +352,9 @@ begin
 	
 	CDC : entity work.CDC
 	port map(
+		DBG_SECTOR_END => DBG_SECTOR_END,
+		DBG_DEC_FRAME  => DBG_DEC_FRAME,
+		DBG_DEC_MID    => DBG_DEC_MID,
 		CLK   		=> CLK,
 		RESET_N     => ERES_N,
 		ENABLE      => ENABLE,

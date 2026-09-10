@@ -81,7 +81,8 @@ module s32x_ddr
 	output     [15:0] lb_q,         // registered: valid the clock after lb_addr
 
 	input      [63:0] tel_audio,    // audio peaks + sample-enable count (tools/phase3_audio_probe.py)
-	input      [63:0] tel_mcdbus    // sub-CPU PRG-RAM bus timing (tools/phase18_prgram_dtack.py)
+	input      [63:0] tel_mcdbus,   // sub-CPU PRG-RAM bus timing (tools/phase18_prgram_dtack.py)
+	input      [63:0] tel_sector    // drive sector rate (tools/phase19_sector_rate.py)
 );
 
 assign DDRAM_CLK = clk;
@@ -227,7 +228,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg   [1:0] tel_pend = 0;    // 3 = counters beat, 2 = audio beat, 1 = MCD bus beat
+reg   [2:0] tel_pend = 0;    // 4 = counters, 3 = audio, 2 = MCD bus, 1 = sector rate
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -299,7 +300,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 2'd3;
+		if (&tel_timer) tel_pend <= 3'd4;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -363,16 +364,19 @@ always @(posedge clk) begin
 				ram_burst <= 8'd1;
 				ram_wr    <= 1;
 				state     <= S_WR;
-				if (tel_pend == 2'd3) begin
+				if (tel_pend == 3'd4) begin
 					tel_seq  <= tel_seq + 1'd1;
 					ram_addr <= BASE_TEL;
 					ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
-				end else if (tel_pend == 2'd2) begin
+				end else if (tel_pend == 3'd3) begin
 					ram_addr <= BASE_TEL + 25'd1;
 					ram_din  <= tel_audio;
-				end else begin
+				end else if (tel_pend == 3'd2) begin
 					ram_addr <= BASE_TEL + 25'd2;
 					ram_din  <= tel_mcdbus;
+				end else begin
+					ram_addr <= BASE_TEL + 25'd3;
+					ram_din  <= tel_sector;
 				end
 			end
 			else if (lp_pend) begin
