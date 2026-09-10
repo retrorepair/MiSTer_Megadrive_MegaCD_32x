@@ -1669,7 +1669,13 @@ module VDP
 		end else begin
 			if (ENABLE && DCLK_CE) begin
 				if ((H_CNT == 9'h013 && !H40) || (H_CNT == 9'h013 && H40))
-					DISP_EN_PIPE[0] <= MR2.DISP & ~IN_VBL;
+					// V_CNT 0x1FF is "line -1": IN_VBL has already cleared for it, but it is a rendering
+					// line (sprite prefetch), not a displayed one. Showing it makes the picture 225 lines
+					// and puts a border row's worth of picture at the top, which flickers because
+					// MR2.DISP is sampled here right at the tail of the BIOS's vblank work. The older
+					// VHDL VDP keeps a separate V_ACTIVE_DISP for this and starts it at V_CNT 0.
+					// See tools/phase12_disp_line.py.
+					DISP_EN_PIPE[0] <= MR2.DISP & ~IN_VBL & (V_CNT != 9'h1FF);
 				else if ((H_CNT == 9'h113 && !H40) || (H_CNT == 9'h153 && H40))
 					DISP_EN_PIPE[0] <= 0;
 				
