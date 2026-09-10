@@ -671,3 +671,33 @@ All of these ran on the first attempt, region forced to US where needed:
 
 Six of six 32X titles, three of three Mega CD discs, the CD32X title and the MD cartridge. No title tested
 so far fails to get past its title screen.
+
+## 2026-09-10 ~01:15 — P3c: same coverage, and timing now CLOSES
+
+`releases/MegaCD_32X_P3c_timing_clean.rbf`. **All clocks meet timing for the first time** (worst slack
++0.127 ns on clk_sys, +0.652 on clk_ram, zero total negative slack, no "timing requirements not met").
+Fit 32,255 ALMs (77 %), 4,130,382 memory bits (73 %).
+
+What closed it: the remaining failures were all the same clk_ram <-> clk_sys crossing, so `MegaCD.sdc` now
+declares the whole crossing multicycle in both directions, justified by the handshakes that bound each
+transfer (busy held two extra clk_ram cycles after capture; request address/strobes held for the whole
+access; pixel data stable ~16 clk_ram cycles at a 6.7 MHz pixel rate). Note this is a *constraint* change
+resting on the `sdram.sv` busy extension - without that extension the constraint would be a lie.
+
+Re-verified on hardware after the change (screenshots `core/shots/z_*.png`): Alien 3, 3 Ninjas gameplay,
+Doom, Virtua Racing Deluxe, Knuckles Chaotix, After Burner Complete, and Night Trap FMV. No regressions.
+
+**Stability:** a 20-minute soak of Night Trap on P3b (identical RTL, looser constraints) ran continuously
+with every telemetry counter advancing and still rendering FMV at the end (`core/shots/soak_nighttrap.png`).
+
+### Remaining known issues
+- **Mega CD BIOS with no disc inserted shows black.** With a disc it boots fine, so this is the
+  "no disc / CD player" path only. Note the `usbios` test MGL is misleading: an MGL `type="f" index="0"`
+  entry goes to the *disc* slot, so that test is really "no disc at all" and Main auto-loads
+  `cifs/MegaCD/boot.rom` (EU) as the BIOS regardless.
+- **Audio unverified on every tier** - no listening test has been done, and nothing in the telemetry
+  covers it.
+- 32X reset topology still simplified (VRES/MRES tied inactive), as srg320 does.
+- Scandoubler/Hq2x still present and unused (the user runs a CRT); worth ~660 ALMs and ~12 M10K, but the
+  obvious stand-in crashed Quartus 17.0's timing wildcard matcher - remove at the `video_mixer`
+  instantiation instead.
