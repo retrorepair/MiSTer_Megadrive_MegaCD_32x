@@ -1047,3 +1047,38 @@ which subsumes r4's `~|MODE` term. It is NOT in r6 because it changes behaviour 
 32X core gates its overlay with `|| !s32x_rom` (S32X.sv:885). **Do not copy that here**: a CD32X title
 has no cartridge - the 32X code arrives from the disc - so `s32x_rom` would be 0 and the gate would
 break Night Trap.
+
+## Doom CD32X Fusion: a real title that needs mode 1, and does not boot
+Source: https://github.com/viciious/d32xr (`src-md/scd.c`, `InitCD`). This is the first non-test program
+found that drives the Mega CD from a cartridge, so it exercises the same path as mcd-verificator.
+
+What it needs, in order:
+1. Find the CD BIOS by matching "SEGA" at $415800+0x6D, else $416000+0x6D, else $41AD00+0x6D. **Our
+   boot.rom has "SEGA CD" at file offset 0x1606D, i.e. exactly the $416000 candidate**, so detection
+   should pass provided the mode-1 BIOS window reads correctly.
+2. Reset the gate array: `$A12002 = $FF00`, then `$A12001` = 3, 2, 0.
+3. `$A12001 = 2`, then spin until bit 1 reads back (bus acknowledge). **No timeout.**
+4. `$A12002 = $0002`, clear PRG RAM, Kosinski-decompress the sub-CPU BIOS to $420000, copy the sub
+   program to $426000.
+5. `$A1200E = 0`, `$A12002 = $2A`, `$A12001 = 1`, then spin until bit 0 reads back (sub-CPU running).
+   **No timeout.**
+6. Every vblank, read-modify-write `$A12000` setting bit 8 (IFL2) to raise a level 2 interrupt on the
+   sub-CPU - the sub BIOS needs these to run at all.
+7. Wait for the sub program to write `'I'` to `$A1200F`. **This one HAS a timeout** (2,000,000 reads,
+   about 2.6 s) after which `InitCD` returns 0 and the game carries on believing there is no CD.
+
+That last point explains the symptom exactly: no hang, no crash, no bus stall, the 32X alive with its
+SH-2 memory counters climbing, and a black screen, because the game has no data. The two spins WITHOUT
+timeouts evidently pass, so the sub-CPU does come out of reset; what fails is the sub program answering.
+
+Measured on the probe build: $A1200E/0F is touched only briefly around t=4.8 s (4 samples in 12 s), not
+spun on, and from t=11 s the 68000 is in its normal loop against the 32X comm register $A15120.
+
+Ruled out: region (header byte F, forcing USA changes nothing), ROM size (4 MB exactly, same as Virtua
+Racing Deluxe and X-Men which both run), disc sector format (converting the 2048-byte ISO to MODE1/2352
+changes nothing), and load order (both orders black).
+
+**Next measurement, not yet done:** instrument the Mega CD sub-CPU - does it fetch from PRG RAM after
+`$A12001 = 1`, does it take the level 2 interrupt the vblank handler raises, and does it ever write
+$A1200F. The gate array does implement IFL2 (`ASIC.vhd:613-617`, gated on `IEN(2)`), so the question is
+whether the sub-CPU gets far enough to enable it.
