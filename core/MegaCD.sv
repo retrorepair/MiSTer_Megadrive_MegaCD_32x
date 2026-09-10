@@ -234,7 +234,7 @@ localparam CONF_STR = {
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
 	"H2-;",
-	"R1,Reset;",
+	//"R1,Reset;"
 	"R0,Reset & Eject CD;",
 	"R[37],Remove Cartridge & Reset;",
 	"R[38],Eject Disc;",
@@ -371,20 +371,6 @@ wire save_download = ioctl_download & (ioctl_index[5:0] == 6'h05);
 
 wire reset = RESET | status[0] | cart_remove | buttons[1] | region_set;
 
-// OSD "Reset" (status[1]): the console's own reset button. It resets the Mega Drive, the 32X and
-// the cartridge, and deliberately does NOT touch the Mega CD - on real hardware the disc keeps
-// spinning and the sub-CPU keeps running, so a CD game returns to its own title screen instead of
-// to the BIOS. R-type OSD entries only pulse their bit, so stretch it to ~9.8 ms (the reference
-// core holds ~9.5 ms). See tools/phase18_soft_reset.py.
-reg [18:0] soft_reset_cnt = 0;
-wire       soft_reset = |soft_reset_cnt;
-always @(posedge clk_sys) begin
-	reg old_soft;
-	old_soft <= status[1];
-	if (~old_soft & status[1]) soft_reset_cnt <= '1;
-	else if (|soft_reset_cnt)  soft_reset_cnt <= soft_reset_cnt - 1'd1;
-end
-
 ///////////////////////////////////////////////////
 
 //Genesis
@@ -434,7 +420,7 @@ wire MCD_BANK23  = ~status[62] | ~dbg_menu;
 
 gen gen
 (
-	.RESET_N(~(reset | soft_reset)),
+	.RESET_N(~reset),
 	.MCLK(clk_sys),
 
 	.VA(GEN_VA),
@@ -792,7 +778,7 @@ wire [15:0] S32X_PWM_L, S32X_PWM_R;
 S32X #(.USE_ROM_WAIT(1)) S32X
 (
 	.CLK(clk_sys),
-	.RST_N(~(reset | soft_reset | rom_download)),
+	.RST_N(~(reset | rom_download)),
 	.SH2_DIV2(status[2]),
 
 	.VCLK(GEN_VCLK_CE),
@@ -887,7 +873,7 @@ wire        CART_EXT = CART_ROM_RD | CART_ROM_WRL | CART_ROM_WRH | CART_SRAM_ACC
 CART cart
 (
 	.CLK(clk_sys),
-	.RST_N(~(reset | soft_reset | rom_download)),
+	.RST_N(~(reset | rom_download)),
 
 	.VCLK(GEN_VCLK_CE),
 	.VA(S32X_CA),
@@ -930,7 +916,7 @@ assign S32X_CDI = CART_DO;
 s32x_ddr s32x_ddr
 (
 	.clk(clk_sys),
-	.reset(reset | soft_reset | rom_download),
+	.reset(reset | rom_download),
 
 	.DDRAM_CLK(DDRAM_CLK),
 	.DDRAM_BUSY(DDRAM_BUSY),
