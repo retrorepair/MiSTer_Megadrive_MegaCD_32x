@@ -135,7 +135,8 @@ module gen
 	input         SPR_GRID_EN,
 
 	output [23:0] DBG_M68K_A,
-	output [23:0] DBG_VA_A
+	output [23:0] DBG_VA_A,
+	output [63:0] DBG_BUSHANG
 );
 
 reg reset;
@@ -437,7 +438,8 @@ BA ba
 	.VBUS_BGACK_N(VBUS_BGACK_N),
 	
 	.MEM_RDY(MEM_RDY),
-	.PAUSE_EN(PAUSE_EN)
+	.PAUSE_EN(PAUSE_EN),
+	.DBG_BUSHANG(DBG_BUSHANG)
 );
 
 assign BA_DI = !RAM_N ? WRAM_Q :

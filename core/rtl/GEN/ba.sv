@@ -79,7 +79,8 @@ module BA
 	input         MEM_RDY,
 	input         PAUSE_EN,
 	
-	output  [7:0] DBG_Z80_HOOK
+	output  [7:0] DBG_Z80_HOOK,
+	output [63:0] DBG_BUSHANG
 );
 
 	wire M68K_INTACK = &M68K_FC & ~M68K_AS_N;
@@ -563,6 +564,44 @@ module BA
 	// corrupt logo band present since the first merge build. The 32X still takes AS_N above, because it
 	// must see VDP-DMA and Z80 cartridge cycles.
 	assign M68K_AS_O_N = M68K_AS_N;
+	// Bus-stall probe (tools/phase4_bushang_probe.py): mstate is held for the whole of an external cycle,
+	// so if it stops changing for far longer than any legitimate access, that cycle never terminated.
+	reg [15:0] stall_cnt;
+	reg  [3:0] stall_prev_state;
+	reg  [7:0] stall_count;
+	reg        stall_seen;
+	reg [23:0] stall_addr;
+	reg  [3:0] stall_state;
+	reg        stall_rnw, stall_dtack, stall_rdy;
+	always @(posedge CLK) begin
+		reg [3:0] last_state;
+		if (!RST_N) begin
+			stall_cnt <= 0; stall_seen <= 0; stall_count <= 0; last_state <= 0;
+		end
+		else begin
+			if (mstate != last_state) begin
+				last_state <= mstate;
+				stall_cnt  <= 0;
+			end
+			else if (mstate != MBUS_IDLE) begin
+				stall_cnt <= stall_cnt + 1'd1;
+				if (&stall_cnt[13:0] && !stall_cnt[15:14]) begin	// ~16k clocks, captured once per stall
+					stall_addr  <= {MBUS_A, 1'b0};
+					stall_state <= mstate;
+					stall_rnw   <= MBUS_RNW;
+					stall_dtack <= DTACK_N;
+					stall_rdy   <= MEM_RDY;
+					stall_prev_state <= stall_state;
+					stall_count <= stall_count + 1'd1;
+					stall_seen  <= 1;
+				end
+			end
+			else stall_cnt <= 0;
+		end
+	end
+	assign DBG_BUSHANG = {16'h5334, stall_addr, stall_state, stall_rnw, stall_seen, stall_dtack,
+	                      stall_rdy, stall_count, 4'h0, stall_prev_state};
+
 	assign ASEL_N  = MBUS_ASEL_N;										//000000-7FFFFF
 	assign IO_N    = ~IO_SEL;											//A10000-A1001F
 	assign TIME_N  = ~TIME_SEL;										//A13000-A130FF

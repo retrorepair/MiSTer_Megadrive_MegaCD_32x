@@ -519,9 +519,11 @@ gen gen
 	.SPR_GRID_EN(1'b0),
 
 	.DBG_M68K_A(),
-	.DBG_VA_A()
+	.DBG_VA_A(),
+	.DBG_BUSHANG(bushang)
 );
 
+wire [63:0] bushang;   // stalled MD bus cycle capture (tools/phase4_bushang_probe.py)
 wire TRANSP_DETECT = 0; // the SystemVerilog VDP has no transparency detect; "Adaptive" blend = Off
 wire cofi_enable = status[47] || (status[48] && TRANSP_DETECT);
 
@@ -946,7 +948,8 @@ s32x_ddr s32x_ddr
 	.lb_addr(S32X_LB_ADDR),
 	.lb_q(S32X_LB_Q),
 
-	.tel_audio(tel_audio)
+	.tel_audio(tel_audio),
+	.tel_bushang(bushang)
 );
 
 always @(posedge clk_sys) begin
