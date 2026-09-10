@@ -136,7 +136,9 @@ module gen
 
 	output [23:0] DBG_M68K_A,
 	output [23:0] DBG_VA_A,
-	output [63:0] DBG_BUSHANG
+	output [63:0] DBG_BUSHANG,
+	output [63:0] DBG_BUSHANG2,
+	output [63:0] DBG_BUSHANG3
 );
 
 reg reset;
@@ -439,7 +441,9 @@ BA ba
 	
 	.MEM_RDY(MEM_RDY),
 	.PAUSE_EN(PAUSE_EN),
-	.DBG_BUSHANG(DBG_BUSHANG)
+	.DBG_BUSHANG(DBG_BUSHANG),
+	.DBG_BUSHANG2(DBG_BUSHANG2),
+	.DBG_BUSHANG3(DBG_BUSHANG3)
 );
 
 assign BA_DI = !RAM_N ? WRAM_Q :

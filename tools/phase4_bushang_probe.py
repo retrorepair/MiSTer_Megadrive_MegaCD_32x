@@ -88,7 +88,7 @@ edit("rtl/GEN/ba.sv", [
 # 2. gen.sv: pass it up
 edit("rtl/GEN/gen.sv", [
 ("	output [23:0] DBG_VA_A", "	output [23:0] DBG_VA_A,\n	output [63:0] DBG_BUSHANG"),
-("	.DBG_Z80_HOOK(),", "	.DBG_Z80_HOOK(),\n	.DBG_BUSHANG(DBG_BUSHANG),"),
+("\t.MEM_RDY(MEM_RDY),\n\t.PAUSE_EN(PAUSE_EN)\n);", "\t.MEM_RDY(MEM_RDY),\n\t.PAUSE_EN(PAUSE_EN),\n\t.DBG_BUSHANG(DBG_BUSHANG)\n);"),
 ])
 
 # 3. top: wire it to a third telemetry beat

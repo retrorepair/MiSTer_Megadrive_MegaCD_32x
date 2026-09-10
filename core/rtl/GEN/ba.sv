@@ -80,7 +80,9 @@ module BA
 	input         PAUSE_EN,
 	
 	output  [7:0] DBG_Z80_HOOK,
-	output [63:0] DBG_BUSHANG
+	output [63:0] DBG_BUSHANG,
+	output [63:0] DBG_BUSHANG2,
+	output [63:0] DBG_BUSHANG3
 );
 
 	wire M68K_INTACK = &M68K_FC & ~M68K_AS_N;
@@ -107,6 +109,19 @@ module BA
 	reg         MBUS_ASEL_N;
 	
 	reg  [15:0] OPEN_BUS;
+
+	// --- bus-stall probe, declared here because the state machine reads stall_kick (phase5_bushang2.py)
+	reg [15:0] stall_cnt;
+	reg  [3:0] stall_prev_state;
+	reg  [7:0] stall_count;
+	reg        stall_seen;
+	reg [23:0] stall_addr;
+	reg  [3:0] stall_state;
+	reg        stall_rnw, stall_dtack, stall_rdy;
+	reg  [1:0] stall_msrc;
+	reg [23:0] stall_a1, stall_a2, stall_a3;	// the three distinct addresses before the latest
+	reg [15:0] stall_total;			// every give-up, saturating, so a handful is distinguishable from a storm
+	wire       stall_kick;
 	
 	reg         CTRL_SEL;
 	reg         IO_SEL;
@@ -524,7 +539,7 @@ module BA
 				end
 	
 			MBUS_NOT_USED: begin
-					if (!DTACK_N) begin
+					if (!DTACK_N || stall_kick) begin
 						M68K_MBUS_DTACK_N <= ~(msrc == MSRC_M68K);
 						VDP_MBUS_DTACK_N <= ~(msrc == MSRC_VDP);
 						Z80_MBUS_DTACK_N <= ~(msrc == MSRC_Z80);
@@ -582,17 +597,11 @@ module BA
 	assign M68K_AS_O_N = M68K_AS_N;
 	// Bus-stall probe (tools/phase4_bushang_probe.py): mstate is held for the whole of an external cycle,
 	// so if it stops changing for far longer than any legitimate access, that cycle never terminated.
-	reg [15:0] stall_cnt;
-	reg  [3:0] stall_prev_state;
-	reg  [7:0] stall_count;
-	reg        stall_seen;
-	reg [23:0] stall_addr;
-	reg  [3:0] stall_state;
-	reg        stall_rnw, stall_dtack, stall_rdy;
 	always @(posedge CLK) begin
 		reg [3:0] last_state;
 		if (!RST_N) begin
 			stall_cnt <= 0; stall_seen <= 0; stall_count <= 0; last_state <= 0;
+			stall_total <= 0;
 		end
 		else begin
 			if (mstate != last_state) begin
@@ -601,22 +610,38 @@ module BA
 			end
 			else if (mstate != MBUS_IDLE) begin
 				stall_cnt <= stall_cnt + 1'd1;
-				if (&stall_cnt[13:0] && !stall_cnt[15:14]) begin	// ~16k clocks, captured once per stall
+				if (&stall_cnt[9:0] && !stall_cnt[15:10]) begin	// ~1k clocks, captured once per stall
 					stall_addr  <= {MBUS_A, 1'b0};
 					stall_state <= mstate;
 					stall_rnw   <= MBUS_RNW;
 					stall_dtack <= DTACK_N;
 					stall_rdy   <= MEM_RDY;
 					stall_prev_state <= stall_state;
+					stall_msrc  <= msrc;
 					stall_count <= stall_count + 1'd1;
 					stall_seen  <= 1;
+					if (~&stall_total) stall_total <= stall_total + 1'd1;
+					// keep a short history, skipping repeats of the same address so a single
+					// endlessly-retried cycle cannot flush the interesting ones out
+					if ({MBUS_A, 1'b0} != stall_addr) begin
+						stall_a1 <= stall_addr;
+						stall_a2 <= stall_a1;
+						stall_a3 <= stall_a2;
+					end
 				end
 			end
 			else stall_cnt <= 0;
 		end
 	end
+	// DIAGNOSTIC ONLY: let a cycle that nothing acknowledges give up, so the machine carries on and the
+	// next stalling address becomes visible. Real hardware waits for /DTACK indefinitely - see the header
+	// of tools/phase5_bushang2.py. Must not appear in a release build.
+	assign stall_kick = (mstate == MBUS_NOT_USED) && (&stall_cnt[9:0]) && !stall_cnt[15:10];
+
 	assign DBG_BUSHANG = {16'h5334, stall_addr, stall_state, stall_rnw, stall_seen, stall_dtack,
-	                      stall_rdy, stall_count, 4'h0, stall_prev_state};
+	                      stall_rdy, stall_count, stall_msrc, 2'b00, stall_prev_state};
+	assign DBG_BUSHANG2 = {16'h5335, stall_a1, stall_a2};
+	assign DBG_BUSHANG3 = {16'h5336, stall_a3, 8'd0, stall_total};
 
 	assign ASEL_N  = MBUS_ASEL_N;										//000000-7FFFFF
 	assign IO_N    = ~IO_SEL;											//A10000-A1001F

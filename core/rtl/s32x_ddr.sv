@@ -81,7 +81,9 @@ module s32x_ddr
 	output     [15:0] lb_q,         // registered: valid the clock after lb_addr
 
 	input      [63:0] tel_audio,    // audio peaks + sample-enable count (tools/phase3_audio_probe.py)
-	input      [63:0] tel_bushang   // stalled MD bus cycle (tools/phase4_bushang_probe.py)
+	input      [63:0] tel_bushang,  // stalled MD bus cycle (tools/phase4_bushang_probe.py)
+	input      [63:0] tel_bushang2, // the addresses before it (tools/phase5_bushang2.py)
+	input      [63:0] tel_bushang3
 );
 
 assign DDRAM_CLK = clk;
@@ -227,7 +229,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg   [1:0] tel_pend = 0;    // 3 = counters, 2 = audio, 1 = stalled-bus capture
+reg   [2:0] tel_pend = 0;    // 5 = counters, 4 = audio, 3..1 = the stalled-bus capture and its history
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -299,7 +301,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 2'd3;
+		if (&tel_timer) tel_pend <= 3'd5;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -364,18 +366,26 @@ always @(posedge clk) begin
 				ram_wr    <= 1;
 				state     <= S_WR;
 				case (tel_pend)
-					2'd3: begin
+					3'd5: begin
 						tel_seq  <= tel_seq + 1'd1;
 						ram_addr <= BASE_TEL;
 						ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
 					end
-					2'd2: begin
+					3'd4: begin
 						ram_addr <= BASE_TEL + 25'd1;
 						ram_din  <= tel_audio;
 					end
-					default: begin
+					3'd3: begin
 						ram_addr <= BASE_TEL + 25'd2;
 						ram_din  <= tel_bushang;
+					end
+					3'd2: begin
+						ram_addr <= BASE_TEL + 25'd3;
+						ram_din  <= tel_bushang2;
+					end
+					default: begin
+						ram_addr <= BASE_TEL + 25'd4;
+						ram_din  <= tel_bushang3;
 					end
 				endcase
 			end

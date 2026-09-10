@@ -106,7 +106,7 @@ edit("rtl/GEN/ba.sv", [
 # 2. gen.sv: pass them up
 edit("rtl/GEN/gen.sv", [
 ("	output [63:0] DBG_BUSHANG", "	output [63:0] DBG_BUSHANG,\n	output [63:0] DBG_BUSHANG2,\n	output [63:0] DBG_BUSHANG3"),
-("	.DBG_BUSHANG(DBG_BUSHANG),", "	.DBG_BUSHANG(DBG_BUSHANG),\n	.DBG_BUSHANG2(DBG_BUSHANG2),\n	.DBG_BUSHANG3(DBG_BUSHANG3),"),
+("\t.DBG_BUSHANG(DBG_BUSHANG)\n);", "\t.DBG_BUSHANG(DBG_BUSHANG),\n\t.DBG_BUSHANG2(DBG_BUSHANG2),\n\t.DBG_BUSHANG3(DBG_BUSHANG3)\n);"),
 ])
 
 # 3. top
