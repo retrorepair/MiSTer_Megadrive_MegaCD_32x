@@ -234,7 +234,9 @@ localparam CONF_STR = {
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
 	"H2-;",
-	//"R1,Reset;"
+	"R[1],Reset;",	// Main rewrites this to status[0] after calling mcd_reset(), so the core sees an
+					// ordinary full reset while the disc image is KEPT; "Reset & Eject CD" below is the
+					// same bit but Main clears the image first (Main_MiSTer/menu.cpp, is_megacd()).
 	"R0,Reset & Eject CD;",
 	"R[37],Remove Cartridge & Reset;",
 	"R[38],Eject Disc;",
