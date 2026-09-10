@@ -703,3 +703,42 @@ with every telemetry counter advancing and still rendering FMV at the end (`core
 - Scandoubler/Hq2x still present and unused (the user runs a CRT); worth ~660 ALMs and ~12 M10K, but the
   obvious stand-in crashed Quartus 17.0's timing wildcard matcher - remove at the `video_mixer`
   instantiation instead.
+
+## 2026-09-10 ~02:00 — P3d: audio verified on every source; /FDC DTACK restored
+
+`phase0/MegaCD_P3d.rbf`. Adds a second telemetry beat at **DDR3 0x30200008** carrying sticky peak levels
+and an audio sample-enable count (`python3 /media/fat/hpsmem.py read 30200008 8`; byte order is
+aud_ce[31:0] then peak final, PWM, Mega CD, console).
+
+**Audio works on all three sources** - previously completely untested:
+
+| Title | console FM/PSG | Mega CD PCM/CDDA | 32X PWM | final mix |
+|---|---|---|---|---|
+| Alien 3 (MD cart) | 26 | - | - | 13 |
+| 3 Ninjas (Mega CD) | 12 | **50** | - | 24 |
+| Doom (32X) | 26 | - | **50** | 13 |
+| Night Trap (CD32X) | 13 | **45** | - | 22 |
+
+(0-255, peak of the top 8 bits of |sample|.) The sample-enable counter advances everywhere, so a silent
+tier would be distinguishable from a stopped audio clock. Night Trap showing no PWM is expected - its
+audio is CD, not 32X PWM.
+
+Also restored the Mega CD's **/FDC ($A12000) DTACK wait** in `rtl/GEN/ba.sv`. The arbiter came from the
+32X core, which has no expansion device, and auto-terminated those cycles. Re-verified after the change:
+Alien 3, 3 Ninjas gameplay, Doom and Night Trap FMV all unaffected, so the earlier breakage attributed to
+this change was really the two changes bundled with it.
+
+Timing: emu clocks still positive (+0.134 clk_sys); `pll_hdmi` now -0.180 ns (TNS -0.28). Only the HDMI
+output domain, and the user runs a CRT, but it is a small regression against P3c - worth a seed sweep.
+
+### mcd-verificator still hangs at "System init..." (open, accuracy only)
+Not a functional blocker - every game tested boots and plays. What is known:
+- It IS running on this core (the pristine upstream core cannot even load the cartridge, because it wants
+  the ROM on ioctl index bit 6 while this Main sends index 6 - the merge fixes that).
+- During the hang the core is alive: telemetry `seq` and the VDP line-prefetch counter advance, and the
+  Mega CD is still producing audio (peak 45).
+- Not caused by: region (tried US via F2 and a US `cd_bios.rom` beside the disc), and not the /FDC DTACK
+  wait (hangs both with and without).
+- Next thing to try: the audit's observation that the NukedMD 75 Hz CDD command hand-off is half of a
+  paired RTL+Main change - check the Main fork actually running on this MiSTer matches
+  `tools/main_patches/`.
