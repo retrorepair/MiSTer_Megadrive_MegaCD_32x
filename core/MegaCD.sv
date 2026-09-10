@@ -172,7 +172,7 @@ end
 localparam CONF_STR = {
 	"MegaCD;;",
 	"S0,CUECHD,Insert Disk;",
-	"FS6,BINGENMD32X,Insert Cartridge;",
+	"FS6,BINGENMD 32X,Insert Cartridge;",	// MiSTer splits this into THREE-character groups: BIN GEN "MD " 32X
 	"O[36],Disc Insert,Reset,Keep Running;",
 	"-;",
 	"h6O67,Region,Auto(JP),JP,US,EU;",
