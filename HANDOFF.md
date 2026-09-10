@@ -900,3 +900,63 @@ $A15000-$A15FFF or $B00000-$BFFFFF.
 New tooling: `tools/mister/make_p3_mgls.sh` clones the test MGL set onto a new core name and adds the
 disc+cartridge verificator combination; `tools/mister/sweep.sh` runs the whole title list, screenshots
 each, and reads the liveness and stall telemetry beats per title.
+
+### Verified on hardware: the control-area fix costs nothing and the hang is gone
+Sixteen titles loaded in turn on the fixed build, each screenshotted with the liveness and stall
+telemetry read while it ran. Fifteen reported no stalled cycle at all; only mcd-verificator did.
+
+| Tier | Titles | Result |
+|---|---|---|
+| MD cartridge | Alien 3 | running |
+| Mega CD | 3 Ninjas, AH-3 Thunderstrike, Batman & Robin, Cobra Command, Earthworm Jim SE, BIOS with no disc | running, BIOS logo clean |
+| 32X cartridge | Doom, Virtua Racing Deluxe, Chaotix, After Burner, Space Harrier, Star Wars Arcade | running |
+| CD32X | Night Trap | title video |
+
+**A trap in my own test rig:** the first pass showed every 32X cartridge sitting on its region-lock
+screen. The console comes up PAL because Main auto-loads an EU `boot.rom`, and neither the F2 hotkey nor
+loading a US `cd_bios.rom` from the MGL changed it. What works is the core's saved status word: bits 7:6
+of `/media/fat/config/MegaCD.CFG` force the region, and 2 there means USA. Backed up as
+`MegaCD.CFG.preregion`. Every core built from this tree shares that one file, because MiSTer names it
+from CONF_STR, not from the .rbf.
+
+### The verificator is not stuck on one address - it is running off the rails
+With $A11FFC terminating, the stall moved, and it moves again between runs: $C00C78 on one run,
+$81FBDA on the next. Both are addresses a real Mega Drive would also hang on ($C00C78 fails the VDP's
+A[7:5]=0 decode; $81FBDA is in the $800000-$9FFFFF area nothing acknowledges). Neither appears as a
+constant anywhere in the ROM. A program that stops at a different wild address each time is not probing
+deliberately; it has lost its place. So $A11FFC was a symptom too, and the real fault is earlier.
+
+**What correct looks like**, from the NukedMD reference core (b66) with the same disc and cartridge:
+```
+Mega-CD verificator V1.02
+CD hardware detected at 0x00400000
+RAM CART....not present OK      COLOR CALC.. OK      VAR TESTS... OK
+IRQ TEST.... ERROR: 0A          REG X000/X002/2006/X00C/8030, CDC REGS.... OK
+PROG RAM.... OK   WORD RAM.... OK   WRAM PROT... OK
+CDC INIT/FLAGS/DMA2/DMA3/DMA1... OK
+Diagnostics complete.
+```
+Ours never prints the first line, so it dies inside CD hardware detection - before it has read anything
+useful out of the BIOS window at $400000. Note the reference fails the IRQ test too, so that one is not
+ours to fix. (The pristine upstream core cannot be used for this comparison: it decodes the cartridge
+from a different ioctl index and simply ignores the cart, booting the BIOS instead.)
+
+Next instrument, ready to build: `tools/phase5_bushang2.py`. It force-terminates a cycle that nothing
+acknowledges after ~1k clocks so the machine keeps going, records the last four DISTINCT addresses that
+needed it plus which master issued each, and counts them. That turns "one address per build" into the
+whole pattern in one build. It is diagnostic only and must never ship.
+
+### A timing edge that had to be fixed, not re-rolled
+The release build of exactly this RTL came out at **-0.126 ns** on clk_sys while the debug build of the
+same logic made +0.009 ns. The failing family is always the same: an address register (the MD arbiter's
+`MBUS_A`, or an SH-2's bus controller) through the cartridge module's SRAM range comparator and output
+mux into `CDI_SYNC`, which the 32X samples on the clk_sys **negedge** - half a period, 9.3 ns, for a path
+that measures 8.5 ns and is mostly routing on a device 77% full. Which side of that line a build lands on
+is placement luck. That is the same condition that once made builds flip between working and dead, so
+re-rolling the fitter would have been the wrong answer.
+
+`CDI_SYNC` has exactly one consumer, `MD_ROM_DO <= CDI_SYNC` in `RS_MD_READ`, and that state cannot be
+reached until at least two clocks after the address settles - the state machine starts from
+`AS_N_SYNC`/`CE0_N_SYNC`, themselves sampled a clock later, then passes through `RS_MD_RW`. So the
+transfer is not single-cycle and the sampler gets a full extra period in `MegaCD.sdc`. An early sample
+is never read.
