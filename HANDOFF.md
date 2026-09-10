@@ -852,3 +852,13 @@ decode does and it removes the audit's phantom-DTACK hijack hazard. Verified on 
 sweep as the release - Mega CD BIOS (clean logo), Alien 3, 3 Ninjas gameplay, Cobra Command FMV, Doom,
 Knuckles Chaotix gameplay, Night Trap FMV - with rendering identical to r1 (screenshot byte sizes match).
 Timing clean (+0.30 / +0.38). Soak in progress before deciding whether to merge.
+
+## RELEASE r2 (supersedes r1) — `releases/MegaCD_MD_MCD_32X_r2.rbf`
+r1 plus address-based selection of the MD data source, which removes the audit's phantom-DTACK hazard
+(the 32X could acknowledge outside its own cycle and hijack an in-flight Mega CD read - exactly the class
+of intermittent fault that cost this project a night). Same RTL otherwise, telemetry compiled out.
+
+Evidence: full hardware sweep (Mega CD BIOS clean logo, Alien 3, 3 Ninjas gameplay, Cobra Command FMV,
+Doom, Knuckles Chaotix gameplay, Night Trap FMV) with rendering identical to r1, plus a 12-minute Night
+Trap soak and a 6-minute 3 Ninjas soak, both running throughout. Timing clean: +0.30 clk_sys, +0.38 clk_ram.
+`releases/MegaCD_MD_MCD_32X_r1_debug_telemetry.rbf` is kept for diagnostics (r1 RTL + DDR3 telemetry).
