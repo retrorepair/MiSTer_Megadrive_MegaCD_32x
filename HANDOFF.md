@@ -647,8 +647,10 @@ Fit: 32,194 ALMs (77 %), 4,130,382 memory bits (73 %). Timing not yet clean (see
 - **BIOS with no disc** shows a black screen (with a disc it boots fine). Low priority but unexplained.
 - Audio has not been checked at all on any tier.
 - No long soak yet; the earlier NukedMD project found a crash only after hours.
-- Deferred by choice: the SH-2 PC probe, per-port SDRAM read registers and the exact 23.011 MHz SH-2 clock
-  (currently srg320's CLK/2 by default, exact rate on OSD debug bit 2) all correlate with dead builds.
+- Deferred by choice: the SH-2 PC probe and the per-port SDRAM read registers (both correlate with dead
+  builds). NOTE the SH-2 clock is NOT deferred: the shipping build runs the accurate **23.011 MHz**
+  (3 of every 7 clk_sys cycles, as the real 32X derives it from the MD master clock), with srg320's
+  CLK/2 = 26.85 MHz available on OSD debug bit 2. Every 32X title and the CD32X FMV run at the real rate.
 - Not yet done from the roadmap: 32X reset topology (VRES/MRES tied inactive), Hq2x/scandoubler removal for
   resources (the user runs a CRT, so that whole path is dead weight), Main-side 32X ROM naming.
 

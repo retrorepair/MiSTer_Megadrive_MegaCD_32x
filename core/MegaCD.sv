@@ -698,6 +698,31 @@ always @(posedge clk_sys) begin
 	cmp_r <= compr(aud_r);
 end
 
+// Audio telemetry: sticky peak of each point in the mix plus a sample-enable count, so a silent tier
+// can be told apart from a stopped audio clock. See tools/phase3_audio_probe.py.
+function [7:0] peak8(input [15:0] v);
+	reg [15:0] a;
+	begin
+		a = v[15] ? (~v + 16'd1) : v;
+		peak8 = a[15:8];
+	end
+endfunction
+reg  [7:0] tel_pk_gen, tel_pk_mcd, tel_pk_pwm, tel_pk_out;
+reg [31:0] tel_aud_ce;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_pk_gen <= 0; tel_pk_mcd <= 0; tel_pk_pwm <= 0; tel_pk_out <= 0; tel_aud_ce <= 0;
+	end
+	else begin
+		if (peak8(GEN_AUDL)   > tel_pk_gen) tel_pk_gen <= peak8(GEN_AUDL);
+		if (peak8(mcd_l)      > tel_pk_mcd) tel_pk_mcd <= peak8(mcd_l);
+		if (peak8(S32X_PWM_L) > tel_pk_pwm) tel_pk_pwm <= peak8(S32X_PWM_L);
+		if (peak8(aud_l)      > tel_pk_out) tel_pk_out <= peak8(aud_l);
+		if (GEN_CE) tel_aud_ce <= tel_aud_ce + 1'd1;
+	end
+end
+wire [63:0] tel_audio = {tel_pk_gen, tel_pk_mcd, tel_pk_pwm, tel_pk_out, tel_aud_ce};
+
 audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the middle of sample period
 (
 	.*,
@@ -914,7 +939,9 @@ s32x_ddr s32x_ddr
 	.lp_done(),
 
 	.lb_addr(S32X_LB_ADDR),
-	.lb_q(S32X_LB_Q)
+	.lb_q(S32X_LB_Q),
+
+	.tel_audio(tel_audio)
 );
 
 always @(posedge clk_sys) begin

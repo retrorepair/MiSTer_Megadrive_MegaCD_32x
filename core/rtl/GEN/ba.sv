@@ -486,10 +486,12 @@ module BA
 				end
 				
 			MBUS_FDC_READ:
-				// NOTE (deferred, see HANDOFF): the Mega CD answers $A12000 with its own /DTACK and the old gen
-				// waited for it; waiting here hangs the boot when nothing answers, so keep srg320's
-				// auto-termination until the corruption work is picked up again.
-				begin
+				// The Mega CD gate array answers $A12000 ( /FDC ) with its own /DTACK, and srg320's older
+				// Mega CD gen waited for it. This arbiter came from the 32X core, which has no expansion
+				// device, so it auto-terminated - returning the register before the ASIC drove it. Games
+				// boot either way because the BIOS is forgiving; mcd-verificator polls these registers raw
+				// and hangs at "System init...". Waiting is what the hardware does.
+				if (!DTACK_N) begin
 					M68K_MBUS_DTACK_N <= ~(msrc == MSRC_M68K);
 					VDP_MBUS_DTACK_N <= ~(msrc == MSRC_VDP);
 					Z80_MBUS_DTACK_N <= ~(msrc == MSRC_Z80);

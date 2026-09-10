@@ -78,7 +78,9 @@ module s32x_ddr
 
 	// line buffer read side (VDP display stream)
 	input       [8:0] lb_addr,      // word index relative to lp_base (0..323)
-	output     [15:0] lb_q          // registered: valid the clock after lb_addr
+	output     [15:0] lb_q,         // registered: valid the clock after lb_addr
+
+	input      [63:0] tel_audio     // audio peaks + sample-enable count (tools/phase3_audio_probe.py)
 );
 
 assign DDRAM_CLK = clk;
@@ -223,7 +225,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg         tel_pend = 0;
+reg   [1:0] tel_pend = 0;    // 2 = counters beat, 1 = audio beat
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -295,7 +297,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 1;
+		if (&tel_timer) tel_pend <= 2'd2;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -353,15 +355,20 @@ always @(posedge clk) begin
 		case (state)
 		S_IDLE: begin
 			// priority: display prefetch (deadline) > queued draw writes > SH-2 write > draw read > SH-2 read
-			if (TELEMETRY && tel_pend) begin
-				tel_pend  <= 0;
-				tel_seq   <= tel_seq + 1'd1;
-				ram_addr  <= BASE_TEL;
-				ram_din   <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
+			if (TELEMETRY && |tel_pend) begin
+				tel_pend  <= tel_pend - 1'd1;
 				ram_be    <= 8'hFF;
 				ram_burst <= 8'd1;
 				ram_wr    <= 1;
 				state     <= S_WR;
+				if (tel_pend == 2'd2) begin
+					tel_seq  <= tel_seq + 1'd1;
+					ram_addr <= BASE_TEL;
+					ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
+				end else begin
+					ram_addr <= BASE_TEL + 25'd1;
+					ram_din  <= tel_audio;
+				end
 			end
 			else if (lp_pend) begin
 				lp_pend    <= 0;
