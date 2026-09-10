@@ -884,8 +884,19 @@ module S32X_IF
 				RS_MD_WAIT: begin
 					if (ROM_WAIT_SYNC) begin
 						ROM_ST <= RS_MD_READ;
-					end else if (MD_ROM_PASS && !CART_EXT) begin
-						// nothing behind the connector fetches for this cycle (mapper register, EEPROM bit, empty slot): done
+					end else if (!CART_EXT) begin
+						// Nothing behind the connector fetches or stores for this cycle, so ROM_WAIT can
+						// never rise and waiting for it hangs. As well as the pass-through cases this was
+						// written for (mapper register, EEPROM bit, empty slot) that covers an MD WRITE
+						// into the $880000-$9FFFFF 32X ROM window: ba.sv:595 asserts /CAS0 on READS only
+						// and cart.sv:244 ties the ROM write strobes off for a normal cartridge, so such a
+						// cycle produces no SDRAM request at all. MD_ROM_PASS is !MD_32XROM_SEL (line 825),
+						// so the old qualifier disabled this escape for precisely that window and left
+						// RS_MD_WAIT with no exit. ROM_ST then never returned to RS_IDLE, SH_ROM_WAIT
+						// (set by any SH-2 CS1 fetch, cleared only in RS_SH_READ) stayed set, SHWAIT_N
+						// stayed low, and BOTH SH-2s parked for ever while the MD's DTACK never came.
+						// Measured as Knuckles' Chaotix freezing after 90-135 s with SH-2 work-RAM reads,
+						// work-RAM writes and frame-buffer draws all stopped and the DDR3 engine healthy.
 						ROM_ST <= RS_MD_READ;
 					end
 				end

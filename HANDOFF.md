@@ -1423,3 +1423,54 @@ Three conclusions recorded above were overturned by later measurement. Do not ac
    were a one-off state on the first load after a core switch; controlled runs give error 0A.
 3. **"The 68000 is alive during the hang" is unsupported.** `tel_lp` comes from free-running video
    timing (`VDP.sv:455`), not from any CPU, and the YM2612 sustains its last register state.
+
+## The 32X SH-2 wedge: an UPSTREAM deadlock in RS_MD_WAIT, fixed in r11
+
+`core/rtl/S32X/IF.sv` `RS_MD_WAIT` was a trap state. Verified line by line:
+
+- `ba.sv:595` `assign CAS0_N = ~MBUS_RNW | MBUS_AS_N` - /CAS0 is asserted on **reads only**;
+  `ba.sv:596-597` assert the write strobes on writes only.
+- `cart.sv:243` `ROM_RD = ROM_ACCESS & ~CAS0_N`, and `cart.sv:244` ties `{ROM_WRH,ROM_WRL}` to
+  `2'b00` for any normal cartridge (only `schan_quirk` is different). So an MD **write** into the
+  32X ROM window produces **no SDRAM port-0 request at all**, and `busy0` never rises.
+- `IF.sv:823-825` sets `MD_ROM_WAIT` on `LWR_F || UWR_F || CAS0_F`, i.e. writes included, with
+  `MD_ROM_PASS <= !MD_32XROM_SEL` - so 0 for `$880000-$9FFFFF`.
+- `RS_MD_WAIT` had exactly two exits: `ROM_WAIT_SYNC` (= `busy0`) and `MD_ROM_PASS && !CART_EXT`.
+  For a `$880000` write the first can never happen and the second is disabled.
+
+`ROM_ST` then never returns to `RS_IDLE`. `SH_ROM_WAIT` is set by any SH-2 CS1 fetch and cleared
+**only** in `RS_SH_READ`, now unreachable, so `SHWAIT_N` stays low and **both SH-2s park for ever**;
+`MD_ROM_DTACK_N` never asserts so the 68000 dies with them and the YM2612 holds its last registers.
+Exactly the measured signature: SH-2 work-RAM reads/writes and frame-buffer draws all frozen while
+the DDR3 engine stayed healthy and free-running video timing kept `tel_lp` moving.
+
+### It is upstream's bug, not this merge's
+```
+32X/IF.sv:879        RS_MD_WAIT: if (ROM_WAIT_SYNC) -> RS_MD_READ     <- the ONLY exit
+32X/IF.sv:819        MD_ROM_WAIT set on (LWR_F || UWR_F || CAS0_F)    <- writes included
+S32X_MiSTer_upstream/S32X.sv:597   .USE_ROM_WAIT(1)                   <- the path is live
+grep -c "MD_ROM_PASS\|CART_EXT" 32X/IF.sv  ->  0
+```
+Pristine upstream has neither `MD_ROM_PASS` nor `CART_EXT`, so its `RS_MD_WAIT` has one exit and the
+same `$880000`-write deadlock, live in the shipping standalone 32X core. This fork *widened the
+trigger* (`IF.sv:823` also routes `/CE0` pass-through cycles through the flag, where upstream had only
+`MD_32XROM_SEL`) but also added the only escape that exists. Worth reporting upstream.
+
+### The fix (r11)
+Drop the `MD_ROM_PASS &&` qualifier: `!CART_EXT` on its own already means "nothing behind the
+connector will answer this cycle", which is equally true of a write to a read-only ROM window. No race:
+`CART_EXT` is combinational from the `S32X_*` strobes latched a clock earlier in `RS_MD_RW`, so it is
+valid throughout `RS_MD_WAIT`; and for a genuine read `CART_EXT` is high, so the escape cannot fire
+early. 78% ALMs, timing +0.400 ns. Deployed as `MegaCD_PB`, **not yet tested on hardware**.
+
+**Still to prove:** that Chaotix actually takes this path. The deadlock is real and reachable and the
+fix is correct regardless, but the confirmation is r10 wedging at 90-135 s where r11 does not.
+Use `tools/mister/sh2watch.sh MegaCD_PB_chaotix ... 20 15`.
+
+### Separate real defect, not yet fixed: SH7604 WDT clock tap
+`core/rtl/SH/SH7604/SH7604.sv:670` wires the WDT's `CLK2_CE` port to `CLK8_CE`. `WDT.sv:48` selects
+that port for `WTCSR.CKS=000`, which the SH7604 defines as phi/2; the prescaler
+(`SH7604.sv:572-583`) has no divide-by-2 tap at all, the smallest being `CLK4_CE`. So `CKS=000` ticks
+at phi/8 and the 8-bit WTCNT overflows every 89.00 us instead of 22.25 us - **4x slow**. `CKS=001..111`
+are all correct, and `WTCSR_INIT = 8'h18` (`SH7604_PKG.sv:332`) selects `CKS=000` at power-on, so any
+code enabling TME without rewriting CKS lands on the broken tap. Both SH-2s carry it.
