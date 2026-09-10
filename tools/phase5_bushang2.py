@@ -19,7 +19,7 @@ Telemetry beats (read with tools/mister/hpsmem.py):
   0x30200010  [63:48] 0x5334  [47:24] latest stalled address  [23:20] mstate  [19] RNW  [18] seen
               [17] DTACK_N  [16] MEM_RDY  [15:8] captures  [7:6] msrc  [5:4] 0  [3:0] previous mstate
   0x30200018  [63:48] 0x5335  [47:24] previous distinct address  [23:0] the one before that
-  0x30200020  [63:48] 0x5336  [47:24] third  [23:0] fourth
+  0x30200020  [63:48] 0x5336  [47:24] third  [23:16] 0  [15:0] total give-ups, saturating
               msrc: 0 none, 1 68000, 2 Z80, 3 VDP
 Usage: phase5_bushang2.py <core dir>   (apply on top of phase4_bushang_probe.py)"""
 import sys, os
@@ -51,6 +51,7 @@ edit("rtl/GEN/ba.sv", [
 	reg        stall_rnw, stall_dtack, stall_rdy;
 	reg  [1:0] stall_msrc;
 	reg [23:0] stall_a1, stall_a2, stall_a3;	// the three distinct addresses before the latest
+	reg [15:0] stall_total;			// every give-up, saturating, so a handful is distinguishable from a storm
 	wire       stall_kick;"""),
 # drop the old mid-file declarations, keep the always block
 ("""	reg [15:0] stall_cnt;
@@ -62,6 +63,14 @@ edit("rtl/GEN/ba.sv", [
 	reg        stall_rnw, stall_dtack, stall_rdy;
 	always @(posedge CLK) begin""",
  """	always @(posedge CLK) begin"""),
+# a give-up costs whatever the threshold is, so shorten it: 1024 clk_sys is 19 us, still ten times
+# longer than the slowest legitimate access, but fast enough that a program probing many dead
+# addresses still makes visible progress instead of crawling.
+("""				if (&stall_cnt[13:0] && !stall_cnt[15:14]) begin	// ~16k clocks, captured once per stall""",
+ """				if (&stall_cnt[9:0] && !stall_cnt[15:10]) begin	// ~1k clocks, captured once per stall"""),
+("""			stall_cnt <= 0; stall_seen <= 0; stall_count <= 0; last_state <= 0;""",
+ """			stall_cnt <= 0; stall_seen <= 0; stall_count <= 0; last_state <= 0;
+			stall_total <= 0;"""),
 ("""					stall_prev_state <= stall_state;
 					stall_count <= stall_count + 1'd1;
 					stall_seen  <= 1;""",
@@ -69,6 +78,7 @@ edit("rtl/GEN/ba.sv", [
 					stall_msrc  <= msrc;
 					stall_count <= stall_count + 1'd1;
 					stall_seen  <= 1;
+					if (~&stall_total) stall_total <= stall_total + 1'd1;
 					// keep a short history, skipping repeats of the same address so a single
 					// endlessly-retried cycle cannot flush the interesting ones out
 					if ({MBUS_A, 1'b0} != stall_addr) begin
@@ -81,12 +91,12 @@ edit("rtl/GEN/ba.sv", [
  """	// DIAGNOSTIC ONLY: let a cycle that nothing acknowledges give up, so the machine carries on and the
 	// next stalling address becomes visible. Real hardware waits for /DTACK indefinitely - see the header
 	// of tools/phase5_bushang2.py. Must not appear in a release build.
-	assign stall_kick = (mstate == MBUS_NOT_USED) && (&stall_cnt[13:0]) && !stall_cnt[15:14];
+	assign stall_kick = (mstate == MBUS_NOT_USED) && (&stall_cnt[9:0]) && !stall_cnt[15:10];
 
 	assign DBG_BUSHANG = {16'h5334, stall_addr, stall_state, stall_rnw, stall_seen, stall_dtack,
 	                      stall_rdy, stall_count, stall_msrc, 2'b00, stall_prev_state};
 	assign DBG_BUSHANG2 = {16'h5335, stall_a1, stall_a2};
-	assign DBG_BUSHANG3 = {16'h5336, stall_a3, 24'd0};"""),
+	assign DBG_BUSHANG3 = {16'h5336, stall_a3, 8'd0, stall_total};"""),
 ("""			MBUS_NOT_USED: begin
 					if (!DTACK_N) begin""",
  """			MBUS_NOT_USED: begin
