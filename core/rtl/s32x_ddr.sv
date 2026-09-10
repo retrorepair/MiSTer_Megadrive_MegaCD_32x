@@ -91,7 +91,8 @@ localparam [24:0] BASE_FB0 = 25'h0020000;   // 0x100000 / 8
 localparam [24:0] BASE_FB1 = 25'h0024000;   // 0x120000 / 8
 localparam [14:0] FB_BEATS = 15'd16384;     // 128 KB / 8
 localparam [24:0] BASE_TEL = 25'h0040000;   // 0x200000 / 8: one telemetry beat (see tools/phase2_telemetry.py)
-localparam        TELEMETRY = 1;
+localparam        TELEMETRY = 0;	// release: telemetry compiled out. Set to 1 for the DDR3 debug beats
+                                    // at 0x30200000 (counters) and 0x30200008 (audio peaks) - see tools/phase2_telemetry.py
 localparam  [6:0] LP_BEATS = 7'd81;         // 324 words from the beat holding lp_start: >= 320 at any alignment
 
 //----------------------------------------------------------------------------

@@ -742,3 +742,41 @@ Not a functional blocker - every game tested boots and plays. What is known:
 - Next thing to try: the audit's observation that the NukedMD 75 Hz CDD command hand-off is half of a
   paired RTL+Main change - check the Main fork actually running on this MiSTer matches
   `tools/main_patches/`.
+
+### Soak results (P3d, all clean)
+| Title | Duration | Result |
+|---|---|---|
+| Night Trap (CD32X) | 20 min | FMV throughout, every counter advancing |
+| Alien 3 (MD cart) | 5 min | ran to attract loop |
+| 3 Ninjas (Mega CD) | 8 min | visibly progressed through the game |
+| Doom (32X) | 8 min | demo running, SH-2 counters advancing |
+
+No freeze, stall or counter stop in ~41 minutes of continuous running across the four tiers.
+
+### mcd-verificator: it is OUR regression, and here is the likely cause
+Decisive comparison - the same cartridge, disc, Main and MiSTer, only the core differs:
+- **b66 (the previous NukedMD MD+MCD core, still on the SD card): the verificator RUNS**, printing
+  "CD hardware detected at 0x00400000" and a full results page (`core/shots/v66_a.png`): RAM CART not
+  present OK, COLOR CALC OK, VAR TESTS ERROR 02, IRQ 0A ERROR 09, REG X000/X002/2006/X00C OK,
+  REG 8030 ERROR 07, CDC REGS OK, PROG RAM OK, WORD RAM OK, WRAM PMOD OK, CDC INIT ERROR 03.
+  (That run is PAL; the project's notes say VAR / REG 8030 / IRQ 09 are fixed-NTSC constants in the ROM.)
+- **This core hangs at "System init...", before CD hardware detection.**
+
+So something in this merge breaks a cartridge's early Mega CD probing. The strongest hypothesis, and the
+first thing to try next session:
+
+The 32X now sits in the cartridge path, and **`MEM_RDY` is tied to 0** in the gen instantiation so that
+every $000000-$7FFFFF cycle waits for an external /DTACK, with the 32X generating it for cartridge cycles
+via the `MD_ROM_PASS` change in `rtl/S32X/IF.sv`. srg320's S32X core instead feeds `MEM_RDY` from the cart
+SDRAM busy and lets the arbiter self-terminate cartridge cycles; only the $880000-$9FFFFF window goes
+through the 32X ROM state machine. Tying it to 0 was necessary because the Mega CD windows must wait for
+the gate array's /DTACK (self-terminating them was the original corrupt-BIOS bug), but it forces every
+cartridge cycle through a state machine that srg320 never used that way, and the audit raised two
+medium-confidence hazards in exactly that path (`MD_ROM_WAIT` latched without ADEN/RV qualification, and
+the `!CART_EXT` escape in `RS_MD_WAIT`).
+
+**Proposed fix:** qualify `MEM_RDY` by address instead of tying it low - assert it (from the cartridge
+SDRAM busy) only for cartridge-space cycles, and leave it low for the Mega CD windows so those still wait
+for the gate array. Then revert `MD_ROM_PASS` so the 32X only owns its own window, as upstream does.
+This was NOT attempted tonight: every tier works, and it is a structural change to the bus that deserves a
+fresh session rather than a 3am edit to a working build.
