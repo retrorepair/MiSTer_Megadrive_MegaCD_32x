@@ -810,3 +810,25 @@ previous project's notes, on upstream srg320 MegaCD (fpgagen MD, where it reache
   `GEN_VDI` source mux keyed on `~S32X_DTACK_N`, or the 32X sitting in the cartridge path at all.
   A cheap next experiment: temporarily force `GEN_VDI` to select `MCD_DO` by address (`EXT_ROM_N`,
   `GEN_RAS2_N`, `EXT_FDC_N`) rather than by the 32X's DTACK, and see whether detection proceeds.
+
+### Compatibility on release r1 (every title tested, all on first attempt)
+| Tier | Title | Result |
+|---|---|---|
+| MD cart | Alien 3 | gameplay |
+| Mega CD | 3 Ninjas Kick Back | gameplay |
+| Mega CD | AH-3 Thunderstrike | title |
+| Mega CD | Adventures of Batman & Robin | title |
+| Mega CD | Cobra Command | full-motion video |
+| Mega CD | Earthworm Jim Special Edition | intro |
+| Mega CD | Bram Stoker's Dracula | title (slow loader - needs ~3 min) |
+| Mega CD | (no disc) | BIOS boots, logo animation clean |
+| 32X | Doom | title/menu |
+| 32X | Virtua Racing Deluxe | 3D attract |
+| 32X | Knuckles Chaotix | **gameplay** |
+| 32X | After Burner Complete | in-game 3D |
+| 32X | Space Harrier | attract |
+| 32X | Star Wars Arcade | intro |
+| CD32X | Night Trap | live FMV |
+
+Six of six 32X cartridges, six of six Mega CD discs, the CD32X title and the MD cartridge. Nothing tested
+has failed to run.
