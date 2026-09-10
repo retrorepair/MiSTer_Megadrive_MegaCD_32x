@@ -862,3 +862,41 @@ Evidence: full hardware sweep (Mega CD BIOS clean logo, Alien 3, 3 Ninjas gamepl
 Doom, Knuckles Chaotix gameplay, Night Trap FMV) with rendering identical to r1, plus a 12-minute Night
 Trap soak and a 6-minute 3 Ninjas soak, both running throughout. Timing clean: +0.30 clk_sys, +0.38 clk_ram.
 `releases/MegaCD_MD_MCD_32X_r1_debug_telemetry.rbf` is kept for diagnostics (r1 RTL + DDR3 telemetry).
+
+## The verificator hang, measured rather than guessed — a real lock-up in the bus arbiter
+Five guesses had already been spent on this. The sixth attempt instrumented it instead
+(`tools/phase4_bushang_probe.py`): the arbiter holds `mstate` for the whole of an external cycle, so a
+counter on "mstate has not changed" identifies a cycle that never terminates, and the address, state,
+read/write flag and acknowledge sources are latched into a third DDR3 telemetry beat at `0x30200010`.
+
+Read while mcd-verificator sat at "System init...":
+
+| read | value | meaning |
+|---|---|---|
+| 1 | `0c05cefc1fa13453` | stalled at **$A11FFC, a read**, arbiter state 12 = `MBUS_NOT_USED`, DTACK_N high |
+| 2 | `0c45cefc1fa13453` | same address, stall count 5 -> 69 |
+| 3 | `0c71cefc1fa13453` | same address, stall count -> 113 |
+
+A working title (3 Ninjas) read back `0000000000003453` — no stall at all. So the hang is one address that
+nothing ever acknowledges.
+
+$A11FFC has `A[23:8] == $A11F`, which matches none of the arbiter's exact-page decodes (A100, A110, A111,
+A112, A113, A120, A130, A140), so it fell through to `MBUS_NOT_USED` — a state that waits for an external
+/DTACK. Inside the control area nothing external will ever drive one, so the machine stopped for good.
+The verificator does not contain $A11FFC as a constant (checked: no such immediate anywhere in the ROM);
+it computes it, most likely as an offset from the $A12000 gate-array base it uses heavily.
+
+**The fix**: an address in $A10000-$A1FFFF that matches no register now terminates its own cycle and
+returns open bus, which is what the console's I/O and bus-arbiter decoder does. This was never
+verificator-specific — any title reading an unmapped control-area address would have locked up.
+
+**The exception that nearly broke the 32X**: the console deliberately drives no /DTACK for
+$A15000-$A15FFF so that a cartridge can, and that is exactly how the 32X answers its own registers
+(`IF.sv` drives `DTACK_N` for $A15100-$A153FF). A blanket $A1xxxx auto-terminate would have cut every 32X
+register cycle short. That window is excluded. Documented at
+https://plutiedev.com/cartridge-slot — the console does not assert /DTACK for $800000-$9FFFFF,
+$A15000-$A15FFF or $B00000-$BFFFFF.
+
+New tooling: `tools/mister/make_p3_mgls.sh` clones the test MGL set onto a new core name and adds the
+disc+cartridge verificator combination; `tools/mister/sweep.sh` runs the whole title list, screenshots
+each, and reads the liveness and stall telemetry beats per title.
