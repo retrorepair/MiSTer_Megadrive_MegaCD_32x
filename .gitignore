@@ -25,3 +25,4 @@ __pycache__/
 # upstream documentation PDFs (large; not needed for the build)
 **/docs/*.pdf
 SH/test/
+scratch/

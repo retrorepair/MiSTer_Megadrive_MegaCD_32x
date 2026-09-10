@@ -1179,3 +1179,63 @@ r5/r6: `status[39] ? GEN_M68K_AS_N : GEN_AS_N` (1 = the good 68000 strobe).
 r7 onward: `status[39] ? GEN_AS_N : GEN_M68K_AS_N` (0 = the good 68000 strobe).
 A config carried over from an r6 A/B therefore selects the BAD strobe on r7 and garbles the BIOS logos.
 Clear bit 39 in /media/fat/config/MegaCD.CFG when moving to r7 or later.
+
+## CDC FLAGS error 40, read from the test's own code instead of guessed at
+
+`core/rtl/MCD/CDC.vhd` is **byte-identical** to the b66 reference that passes this test, and
+`ASIC.vhd` differs only in the PRG-RAM DTACK hunks, so the failure is not CD decoder logic. The test
+ROM settles what it actually measures. Disassembled with `tools/dis68k.py` (rewritten this session -
+the old copy was lost in the `git stash -u` incident):
+
+```
+01454A  clr.w d4 / clr.w d5
+014568  loop1: read CDC register 1 (IFSTAT) via the main<->sub RPC; addq #1,d4; loop while bit5 == 0
+014582  loop2: same; addq #1,d5;                                    loop while bit5 == 1
+01459A  d0 = d4 - 48 ; cmpi.w #2,d0 ; bhi -> FAIL 40      d4 expected 48-50
+0145A8  d7 = d5 - 71 ; cmpi.w #2,d7 ; bhi -> FAIL 41      d5 expected 71-73
+```
+
+IFSTAT bit 5 is DECI. 49/(49+72) = **40.5%**, which is jsgroth's "the decoder interrupt flag should
+automatically clear about 40% of the way through a 75Hz frame". The routine at `0x13EF6` is the one
+that prints `CDC FLAGS`; the `0x12E4E` routine with the same sub-test numbers is `CDC DMA3`, which is
+a trap worth avoiding.
+
+### Getting d5 without a rebuild
+The run stops at the d4 check, so d5 was never visible. `tools/verif_patch_cdcflags.py` widens the d4
+bound (`0145A0 cmpi.w #$2,d0` -> `cmpi.w #$FFFF,d0`) so BHI can never be taken and the run reports d5
+as error 41. Verified sound: **b66 runs the patched ROM and still reports CDC FLAGS OK.**
+
+| | d4 (asserted) | d5 (cleared) | duty | implied P |
+|---|---|---|---|---|
+| hardware / b66 | 48-50 | 71-73 | 40.5% | 13.45 ms |
+| ours (r7) | **87** | **69** | **55.8%** | **~18 ms** |
+
+The cleared phase is right and all the extra time is in the asserted phase. CDC.vhd asserts DECI and
+pulses SECTOR_END (which zeroes FRAME_CNT) at the last word of every sector, and DEC_MID clears DECI
+40% of a frame later, so with sectors every P:
+
+    cleared  = 13.33 - 5.33 = 8.0 ms          (fixed)
+    asserted = (P - 13.33) + 5.33 = P - 8.0
+
+The model reproduces b66's numbers exactly, and **the duty cycle is independent of how fast the poll
+loop runs**, so P ~ 18 ms is a real result: sectors are arriving nearer 55 Hz than 75 Hz.
+
+### The disc is what breaks the timing tests
+Same core, same cart, disc removed:
+
+```
+with disc:     IRQ TEST....:127  ERROR: 06     CDC FLAGS...:87  ERROR: 40
+without disc:  IRQ TEST....:227  ERROR: 09     (CDC INIT 03 - needs a disc, CDC FLAGS not reached)
+```
+
+jsgroth's expected range for the IRQ counting sub-test is **224-226**; with no disc we produce 227.
+So the inter-CPU timing is very nearly right and **disc activity is what pushes these tests off**.
+That reframes VAR TESTS / IRQ TEST / REG 8030 as well: they may not be 68000 cycle accuracy at all.
+
+Not yet explained: CDD_SEND is a clean 75 Hz (`ASIC.vhd` `CDD_FRAME_CNT = 166666` on `CLK_12M_F`,
+identical to b66), `CLK_12M_F`/`CLK_CNT`/`CLK50_EN` are identical, and both top levels feed the CDC
+through the same `hps_ext` path. So the request pacing is right and the sectors themselves are late.
+`tools/phase19_sector_rate.py` adds telemetry beat 4 (SECTOR_END / CDD_SEND / DEC_FRAME / DEC_MID
+counters) to tell delivery from pacing. Noted in passing: `S32X_VDP`'s `LP_REQ` is unconditional
+(`assign LP_REQ = DOT_CE && H_CNT == 9'h1D0`), so the 32X DDR3 line prefetch runs every scanline even
+with no 32X cartridge.

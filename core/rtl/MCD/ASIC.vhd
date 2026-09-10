@@ -52,6 +52,9 @@ entity ASIC is
 		PRG_OE_N			: out std_logic;
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
+		DBG_EARLY_DTACK: in std_logic;		-- 1 = acknowledge the sub-CPU when the SDRAM accepts the
+														-- request rather than when the data is back (reference
+														-- core timing). See tools/phase18_prgram_dtack.py.
 
 		PCM_A				: out std_logic_vector(12 downto 0);
 		PCM_DI			: out std_logic_vector(7 downto 0);
@@ -1551,7 +1554,13 @@ begin
 								PRG_RAM_WRL <= not S68K_LDS_N and not S68K_RNW;
 								PRG_RAM_WRH <= not S68K_UDS_N and not S68K_RNW;
 								PRG_RAM_RD <= S68K_RNW;
-								-- (fx68k sub-CPU: writes are acknowledged in PRS_WRITE, reads in PRS_READ, as upstream)
+								-- Writes are posted when DBG_EARLY_DTACK is set: address and data are latched
+								-- here, so the CPU can be acknowledged at once (real PRG-RAM takes writes
+								-- without wait states); the next PRG-RAM access still waits for this one to
+								-- reach the SDRAM controller. Default is upstream: acknowledge in PRS_WRITE.
+								if DBG_EARLY_DTACK = '1' and S68K_RNW = '0' then
+									S68K_PRGRAM_DTACK_N <= '0';
+								end if;
 								PRSS <= PRS_WAIT;
 							else
 								PRG_RAM_WRL <= '0';
@@ -1569,6 +1578,14 @@ begin
 
 					when PRS_WAIT =>
 						if PRG_RDY = '0' then
+							-- The SDRAM controller has accepted the request. With DBG_EARLY_DTACK the CPU is
+							-- acknowledged here and latches the data one clock later, which is what the real
+							-- PRG-RAM does; it relies on the read completing inside that clock, and on this
+							-- core the port sits below the cartridge port so that is not guaranteed. Measured
+							-- by the beat-3 telemetry before it is made the default.
+							if DBG_EARLY_DTACK = '1' and PRG_RAM_RD = '1' then
+								S68K_PRGRAM_DTACK_N <= '0';
+							end if;
 							if PRG_RAM_RD = '1' then
 								PRSS <= PRS_READ;
 							else

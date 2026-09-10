@@ -80,7 +80,8 @@ module s32x_ddr
 	input       [8:0] lb_addr,      // word index relative to lp_base (0..323)
 	output     [15:0] lb_q,         // registered: valid the clock after lb_addr
 
-	input      [63:0] tel_audio     // audio peaks + sample-enable count (tools/phase3_audio_probe.py)
+	input      [63:0] tel_audio,    // audio peaks + sample-enable count (tools/phase3_audio_probe.py)
+	input      [63:0] tel_mcdbus    // sub-CPU PRG-RAM bus timing (tools/phase18_prgram_dtack.py)
 );
 
 assign DDRAM_CLK = clk;
@@ -91,7 +92,7 @@ localparam [24:0] BASE_FB0 = 25'h0020000;   // 0x100000 / 8
 localparam [24:0] BASE_FB1 = 25'h0024000;   // 0x120000 / 8
 localparam [14:0] FB_BEATS = 15'd16384;     // 128 KB / 8
 localparam [24:0] BASE_TEL = 25'h0040000;   // 0x200000 / 8: one telemetry beat (see tools/phase2_telemetry.py)
-localparam        TELEMETRY = 0;	// release: telemetry compiled out. Set to 1 for the DDR3 debug beats
+localparam        TELEMETRY = 1;	// release: telemetry compiled out. Set to 1 for the DDR3 debug beats
                                     // at 0x30200000 (counters) and 0x30200008 (audio peaks) - see tools/phase2_telemetry.py
 localparam  [6:0] LP_BEATS = 7'd81;         // 324 words from the beat holding lp_start: >= 320 at any alignment
 
@@ -226,7 +227,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg   [1:0] tel_pend = 0;    // 2 = counters beat, 1 = audio beat
+reg   [1:0] tel_pend = 0;    // 3 = counters beat, 2 = audio beat, 1 = MCD bus beat
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -298,7 +299,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 2'd2;
+		if (&tel_timer) tel_pend <= 2'd3;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -362,13 +363,16 @@ always @(posedge clk) begin
 				ram_burst <= 8'd1;
 				ram_wr    <= 1;
 				state     <= S_WR;
-				if (tel_pend == 2'd2) begin
+				if (tel_pend == 2'd3) begin
 					tel_seq  <= tel_seq + 1'd1;
 					ram_addr <= BASE_TEL;
 					ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
-				end else begin
+				end else if (tel_pend == 2'd2) begin
 					ram_addr <= BASE_TEL + 25'd1;
 					ram_din  <= tel_audio;
+				end else begin
+					ram_addr <= BASE_TEL + 25'd2;
+					ram_din  <= tel_mcdbus;
 				end
 			end
 			else if (lp_pend) begin

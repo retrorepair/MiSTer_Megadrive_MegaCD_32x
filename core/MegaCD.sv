@@ -233,6 +233,7 @@ localparam CONF_STR = {
 	"H2O[62],MCD RAM,Banks 2&3,Banks 0&1;",
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
+	"H2O[28],MCD PRG DTACK,Data,Early;",
 	"H2-;",
 	"R[1],Reset;",	// Main rewrites this to status[0] after calling mcd_reset(), so the core sees an
 					// ordinary full reset while the disc image is KEPT; "Reset & Eject CD" below is the
@@ -626,6 +627,12 @@ MCD MCD
 	.PRG_WRH_N(MCD_PRG_WRH_N),
 	.PRG_OE_N(MCD_PRG_OE_N),
 	.PRG_RDY(~MCD_PRG_BUSY),
+	.DBG_EARLY_DTACK(status[28] & dbg_menu),
+
+	.DBG_S68K_AS_N(MCD_DBG_AS_N),
+	.DBG_S68K_DTACK_N(MCD_DBG_DTACK_N),
+	.DBG_S68K_RNW(MCD_DBG_RNW),
+	.DBG_S68K_A(MCD_DBG_A),
 	
 	.ROM_DI(GEN_MEM_DO),
 	.ROM_CE_N(GEN_ROM_CE_N),
@@ -738,6 +745,51 @@ always @(posedge clk_sys) begin
 	end
 end
 wire [63:0] tel_audio = {tel_pk_gen, tel_pk_mcd, tel_pk_pwm, tel_pk_out, tel_aud_ce};
+
+// Sub-CPU PRG-RAM bus timing (tools/phase18_prgram_dtack.py). The sub-CPU runs at 12.5 MHz, so one CPU
+// clock is 4.2946 clk_sys. /AS falls at the start of S2 and /DTACK is sampled at the end of S4: the gate
+// array has 1.5 CPU clocks = 120 ns = 6.44 clk_sys to answer, or the CPU inserts a wait state. Counting
+// the reads that miss that deadline says whether the sub-CPU really is running slow, which is what all
+// four remaining verificator failures look like.
+wire        MCD_DBG_AS_N, MCD_DBG_DTACK_N, MCD_DBG_RNW;
+wire [23:0] MCD_DBG_A;
+
+localparam [7:0] DTACK_DEADLINE = 8'd6;
+
+reg         dbg_as_d = 1, dbg_dtack_d = 1;
+reg   [7:0] dbg_lat;
+reg         dbg_arm;
+reg   [7:0] tel_lat_min, tel_lat_max;
+reg  [15:0] tel_lat_slow;
+reg  [31:0] tel_lat_n;
+
+always @(posedge clk_sys) begin
+	if (reset) begin
+		dbg_as_d <= 1; dbg_dtack_d <= 1; dbg_lat <= 0; dbg_arm <= 0;
+		tel_lat_min <= 8'hFF; tel_lat_max <= 0; tel_lat_slow <= 0; tel_lat_n <= 0;
+	end
+	else begin
+		dbg_as_d    <= MCD_DBG_AS_N;
+		dbg_dtack_d <= MCD_DBG_DTACK_N;
+
+		if (dbg_as_d & ~MCD_DBG_AS_N) begin
+			// /AS falling. Time it only if it is a sub-CPU PRG-RAM read: PRG-RAM is $000000-$07FFFF
+			// on the sub side, and a write is acknowledged by a different path.
+			dbg_lat <= 0;
+			dbg_arm <= MCD_DBG_RNW & ~|MCD_DBG_A[23:19];
+		end
+		else if (~MCD_DBG_AS_N && ~&dbg_lat) dbg_lat <= dbg_lat + 8'd1;
+
+		if (dbg_arm & dbg_dtack_d & ~MCD_DBG_DTACK_N) begin
+			dbg_arm      <= 0;
+			tel_lat_n    <= tel_lat_n + 32'd1;
+			if (dbg_lat > DTACK_DEADLINE && ~&tel_lat_slow) tel_lat_slow <= tel_lat_slow + 16'd1;
+			if (dbg_lat < tel_lat_min) tel_lat_min <= dbg_lat;
+			if (dbg_lat > tel_lat_max) tel_lat_max <= dbg_lat;
+		end
+	end
+end
+wire [63:0] tel_mcdbus = {tel_lat_min, tel_lat_max, tel_lat_slow, tel_lat_n};
 
 audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the middle of sample period
 (
@@ -957,7 +1009,8 @@ s32x_ddr s32x_ddr
 	.lb_addr(S32X_LB_ADDR),
 	.lb_q(S32X_LB_Q),
 
-	.tel_audio(tel_audio)
+	.tel_audio(tel_audio),
+	.tel_mcdbus(tel_mcdbus)
 );
 
 always @(posedge clk_sys) begin

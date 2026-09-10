@@ -34,6 +34,7 @@ entity MCD is
 		PRG_OE_N			: out std_logic;
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
+		DBG_EARLY_DTACK: in std_logic := '0';
 		
 		ROM_DI			: in std_logic_vector(15 downto 0);
 		ROM_CE_N			: out std_logic;
@@ -266,6 +267,7 @@ begin
 		PRG_OE_N  		=> PRG_OE_N,
 		PRG_RFS  		=> PRG_RFS,
 		PRG_RDY  		=> PRG_RDY,
+		DBG_EARLY_DTACK => DBG_EARLY_DTACK,
 		
 		PCM_A   			=> PCM_A,
 		PCM_DI   		=> PCM_DI,
