@@ -1136,3 +1136,46 @@ space takes this path.
 - Sub-CPU IPL is strict priority INT5 > INT4 > INT3 > INT2 > INT1, and on IACK the source matching the
   acknowledged level must be cleared - jgenesis notes mcd-verificator fails otherwise.
 - BIOS window offset $70-$73 returns $FFFF then the $A12006 HINT vector, not BIOS bytes. Ours does this.
+
+## r7: mcd-verificator RUNS TO COMPLETION
+The one-line latch fix worked. From hanging at "System init..." on every build since the merge began, to
+the full diagnostic page:
+
+```
+Mega-CD verificator V1.02
+CD hardware detected at 0x00400000
+RAM CART....not present OK      COLOR CALC.. OK
+VAR TESTS...:26801  ERROR: 02   IRQ TEST....:26  ERROR: 06
+REG X000/X002/2006/X00C.... OK  REG 8030....:1281  ERROR: 08
+CDC REGS.... OK                 PROG RAM.... OK
+WORD RAM.... OK                 WRAM PMOD... OK
+CDC INIT.... OK                 CDC FLAGS...:87  ERROR: 40
+CDC DMA2/DMA3/DMA1.... OK
+Diagnostics complete.
+```
+
+**14 of 18 pass**, including every test that exercises the repaired path: PROG RAM, WORD RAM, WRAM PMOD,
+CDC INIT and all three CDC DMA tests. Timing +0.548 ns, 77% ALMs.
+
+Comparison with the NukedMD reference (b66), which passes everything except IRQ TEST:
+
+| Test | ours (r7) | b66 | note |
+|---|---|---|---|
+| VAR TESTS | ERROR 02 | OK | 68000 cycle behaviour - the accepted fpgagen cost (§2, §5.1) |
+| IRQ TEST | ERROR 06 | ERROR 0A | **both fail**, different codes |
+| REG 8030 | ERROR 08 | OK | 68000 cycle behaviour |
+| CDC FLAGS | ERROR 40 | OK | worth investigating - not obviously a CPU-accuracy test |
+
+`CDC FLAGS` is the interesting one: it is not a cycle-exactness test, so it may be a real defect rather
+than an accepted cost.
+
+### Doom CD32X Fusion: blocker removed, still crashes
+Now boots through the BIOS to "CHECKING DISC" and then crashes - a solid green screen with a continuous
+high-pitched tone (user-observed), or black. Previously it managed only a single dashed line. So the
+latch fix removed a blocker but there is at least one more.
+
+### Trap for the next session: OSD debug bit 39 changed POLARITY in r7
+r5/r6: `status[39] ? GEN_M68K_AS_N : GEN_AS_N` (1 = the good 68000 strobe).
+r7 onward: `status[39] ? GEN_AS_N : GEN_M68K_AS_N` (0 = the good 68000 strobe).
+A config carried over from an r6 A/B therefore selects the BAD strobe on r7 and garbles the BIOS logos.
+Clear bit 39 in /media/fat/config/MegaCD.CFG when moving to r7 or later.
