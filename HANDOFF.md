@@ -960,3 +960,36 @@ reached until at least two clocks after the address settles - the state machine 
 `AS_N_SYNC`/`CE0_N_SYNC`, themselves sampled a clock later, then passes through `RS_MD_RW`. So the
 transfer is not single-cycle and the sampler gets a full extra period in `MegaCD.sdc`. An early sample
 is never read.
+
+## RELEASE r3 (supersedes r2) — `releases/MegaCD_MD_MCD_32X_r3.rbf`
+Two changes over r2, one functional and one that removes a source of build-to-build luck.
+
+1. **An unmapped address in the control area now terminates its own cycle** instead of waiting for a
+   /DTACK nothing will drive. That was a real lock-up, not a verificator quirk: any title reading an
+   unmapped $A1xxxx address would have hung the machine. $A15000-$A15FFF is excluded, because the
+   console deliberately leaves that window unacknowledged so a cartridge can answer it, and that is how
+   the 32X answers its own registers.
+2. **The 32X's cartridge-bus sampler gets a full clock period** in `MegaCD.sdc`. It is clocked on the
+   negedge, so the path from an address register through the cartridge SRAM decode had 9.3 ns for 8.5 ns
+   of mostly-routing delay. The release build of the same RTL came out at **-0.126 ns** while the debug
+   build made +0.009 ns; with the exception it is **+0.756 ns** and the core's own logic is no longer the
+   limiter (the worst path is now inside the framework's HDMI scaler at +0.277 ns).
+
+| | r2 | r3 |
+|---|---|---|
+| clk_sys setup slack | +0.30 | **+0.756** |
+| clk_ram setup slack | +0.38 | +0.425 |
+| ALMs | - | 32,187 / 41,910 (77%) |
+| M10K blocks | - | 539 / 553 (97%) |
+
+Verified on hardware: all sixteen titles loaded and ran (Mega CD BIOS logo clean, Alien 3, 3 Ninjas,
+AH-3 Thunderstrike, Batman & Robin, Cobra Command, Earthworm Jim SE, Doom, Virtua Racing Deluxe,
+Chaotix, After Burner, Space Harrier, Star Wars Arcade, Night Trap CD32X), plus a 12-minute Night Trap
+soak on the same RTL with the liveness counter advancing at every one of 24 samples and all 24 frames
+distinct.
+
+**Two test-rig traps worth remembering.** Forcing the region through `MegaCD.CFG` bits 7:6 is what makes
+32X cartridges run, but leaving it set makes the BIOS-with-no-disc boot render black - which looks
+exactly like a core regression until you load the same MGL on the previous build and see it too. Restore
+the file afterwards. And do not run `git stash -u` or switch branches while a background test is writing
+screenshots into an untracked directory; it took the directory with it mid-sweep.
