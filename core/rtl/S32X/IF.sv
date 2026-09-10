@@ -1021,7 +1021,11 @@ module S32X_IF
 		else if (MD_VDP_SEL)
 			VDO = VDP_DI;
 		else
-			VDO = CDI;
+			// Cartridge space. Return the word LATCHED by RS_MD_READ, not a live wire into sdram.sv's
+			// single shared dout register - the Mega CD sub-CPU (port 2) and the PCM engine (port 3)
+			// run asynchronously to this bus cycle and will overwrite it before fx68k takes its final
+			// sample. See tools/phase17_cart_latch.py.
+			VDO = USE_ROM_WAIT ? MD_ROM_DO : CDI;
 	end
 
 	assign DTACK_N = MD_REG_DTACK_N & MD_ROM_DTACK_N & VDP_DTACK_N & ~MD_32XID_SEL & ~(MD_BIOS_SEL & ~CE0_N_SYNC[0] & ~AS_N_SYNC[0]);
