@@ -527,7 +527,12 @@ wire cofi_enable = status[47] || (status[48] && TRANSP_DETECT);
 
 // The 32X sits in the cartridge slot: everything on /CE0, /TIME and its own windows comes back through it
 // (cart.sv answers behind it on the pass-through bus); the Mega CD is on the expansion port.
-assign GEN_VDI = (~S32X_DTACK_N | ~GEN_PAGE_CE_N) ? S32X_VDO : MCD_DO;
+// Select the source by ADDRESS, not by the 32X's /DTACK. Keying off ~S32X_DTACK_N means that if the 32X
+// ever asserts DTACK outside its own cycle - the audit found MD_ROM_WAIT can be latched and left set,
+// letting the ROM arbiter run a phantom cycle later - it hijacks whatever read is in flight, including a
+// Mega CD one. The Mega CD owns exactly its three decoded windows; everything else is the cartridge side.
+wire        mcd_window = ~EXT_ROM_N | ~GEN_RAS2_N | ~EXT_FDC_N;
+assign GEN_VDI = mcd_window ? MCD_DO : S32X_VDO;
 assign GEN_DTACK_N = MCD_DTACK_N & S32X_DTACK_N & CART_DTACK_N;
 
 
