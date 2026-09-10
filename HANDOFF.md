@@ -1082,3 +1082,57 @@ changes nothing), and load order (both orders black).
 `$A12001 = 1`, does it take the level 2 interrupt the vblank handler raises, and does it ever write
 $A1200F. The gate array does implement IFL2 (`ASIC.vhd:613-617`, gated on `IEN(2)`), so the question is
 whether the sub-CPU gets far enough to enable it.
+
+## ROOT CAUSE FOUND: the Mega Drive's cartridge read was never latched
+Three readers took our fetch path, the reference core at C:\Users\joelw\Documents\MegaCD_MiSTer_New, and
+jgenesis. The answer is architectural, not a timing race, and not the CDI_SYNC multicycle.
+
+`sdram.sv` has ONE data register shared by all five ports:
+```systemverilog
+reg [15:0] dout;
+assign dout0 = dout; assign dout1 = dout; ... assign dout4 = dout;
+if (state == STATE_READY && ram_req) dout <= SDRAM_DQ;   // not even qualified read vs write
+```
+Every consumer latches it on its own handshake - the Mega CD gate array (ASIC.vhd:809-818), the 32X for
+the SH-2 and for its own $880000 window - **except a Mega Drive read of cartridge space**, which was a
+live combinational wire: sdram dout -> CART_MEM_DO -> cart.sv VDO -> S32X_CDI -> `else VDO = CDI` ->
+GEN_VDI -> MBUS_DI -> the 68000's data pins, with no storage anywhere.
+
+fx68k re-samples its data input on every enPhi2 and keeps the LAST one, and the 68000 runs at 1-in-7
+clk_sys. So the word must survive ~130-200 ns after the 32X released the cycle. One SDRAM access is
+~65 ns, so it has to survive two or three foreign accesses, and port 0 never re-reads.
+
+**Why it appears exactly at $D38E:** that code runs immediately after the cartridge starts the sub-CPU -
+the moment the machine goes from "only the MD touches SDRAM, all serialised by the one MBUS arbiter" to
+"the sub-CPU fetches from PRG RAM on port 2, asynchronous to the MD bus". Before it, every fetch is
+correct; after it, a large fraction are exposed. A wrong word desynchronises the 68000's prefetch, which
+is why it executes two bytes into `lea $F36E,a2` and takes a line F.
+
+**Why the reference core is immune:** identical shared-dout sdram.sv, but its cartridge module registers
+the word out of dout on the busy falling edge and presents the register. One line of difference.
+
+**The fix (r7):** the 32X's ROM state machine already latches the word at the right instant for
+pass-through cycles too (`RS_MD_READ: MD_ROM_DO <= CDI_SYNC`) and asserts DTACK from there. It just did
+not return it. `tools/phase17_cart_latch.py` makes cartridge space return `MD_ROM_DO`, exactly as the
+$880000 window already did. Safe: gen.sv:458 serves work RAM, I/O and VDP internally, so only cartridge
+space takes this path.
+
+### Cleared by the same investigation
+- **The CDI_SYNC multicycle is NOT the cause.** Its claim is literally true - one consumer, read late
+  enough. It is fine to keep.
+- **My phantom-DTACK hypothesis was wrong as the primary cause**, but the hazard IS real and remains:
+  `MD_ROM_WAIT`/`MD_ROM_PASS` are set outside the case statement and cleared only in RS_MD_READ, so a
+  strobe edge arriving mid-cycle is replayed later against whatever address is current, and its
+  MD_ROM_DTACK_N still reaches the 68000. MegaCD.sv:544-549 fixed only the data mux. **Worth fixing next**
+  - and note it now matters more, because with r7 the returned word is a latch that is stale until
+  RS_MD_READ, held off only by DTACK.
+
+### jgenesis reference semantics, for later accuracy work
+- Main-CPU writes to PRG RAM are dropped unless SBRQ is asserted or SRES holds the sub-CPU in reset;
+  write protect ($A12002 high byte) applies to the SUB CPU only, never the main CPU. Ours matches.
+- At power-on both SBRQ and SRES are asserted, so a mode-1 cartridge can write PRG RAM immediately.
+- IFL2 is a LEVEL: set by writing 1, cleared by writing 0 or by the sub-CPU acknowledging INT2 - not
+  self-clearing, and not cleared by reset.
+- Sub-CPU IPL is strict priority INT5 > INT4 > INT3 > INT2 > INT1, and on IACK the source matching the
+  acknowledged level must be cleared - jgenesis notes mcd-verificator fails otherwise.
+- BIOS window offset $70-$73 returns $FFFF then the $A12006 HINT vector, not BIOS bytes. Ours does this.
