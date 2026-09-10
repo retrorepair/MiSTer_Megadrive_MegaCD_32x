@@ -900,8 +900,6 @@ $A15000-$A15FFF or $B00000-$BFFFFF.
 New tooling: `tools/mister/make_p3_mgls.sh` clones the test MGL set onto a new core name and adds the
 disc+cartridge verificator combination; `tools/mister/sweep.sh` runs the whole title list, screenshots
 each, and reads the liveness and stall telemetry beats per title.
-<<<<<<< HEAD
-=======
 
 ### Verified on hardware: the control-area fix costs nothing and the hang is gone
 Sixteen titles loaded in turn on the fixed build, each screenshotted with the liveness and stall
@@ -962,4 +960,3 @@ reached until at least two clocks after the address settles - the state machine 
 `AS_N_SYNC`/`CE0_N_SYNC`, themselves sampled a clock later, then passes through `RS_MD_RW`. So the
 transfer is not single-cycle and the sampler gets a full extra period in `MegaCD.sdc`. An early sample
 is never read.
->>>>>>> main
