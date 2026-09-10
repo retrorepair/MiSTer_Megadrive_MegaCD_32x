@@ -1013,3 +1013,37 @@ Next version should freeze on ANY vector fetch in $000008-$0000FF (the reset vec
 excepted), and should record the write ADDRESS beside the data so a stack push is distinguishable from a
 register write. The finding that stands is unchanged: an address error is taken, confirmed again here by
 run 2's vector fetch.
+
+### The alternating border line: found in the RTL, and a refinement held back
+Three readers compared vdp.sv against vdp.vhd and this project's video path. The measured symptom - PAL
+346x294, output row 37 alternating between a border row and a picture row while every other border row
+is static - is pinned arithmetically:
+
+`vdp.sv` decides border-versus-picture with `DISP_EN_PIPE[0] <= MR2.DISP & ~IN_VBL` (vdp.sv:1672) and
+clears `IN_VBL` a line early, at V_CNT 0x1FE (vdp.sv:882-883). So V_CNT 0x1FF, "line -1", is
+display-enabled and the picture is 225 lines. With PAL, V28 and the border on, output row 0 is V_CNT
+0x1DA, so row 37 **is** V_CNT 0x1FF and row 38 is V_CNT 0x000 - exactly the measured boundary. The older
+VHDL VDP keeps a separate `V_ACTIVE_DISP` for the display decision, starting at V_CNT 0
+(vdp.vhd:2424-2429), and uses IN_VBL only for the status flag. That is why upstream never shows it.
+
+It alternates rather than sitting steady because `MR2.DISP` is the only frame-varying term, sampled once
+per line at H_CNT 0x013 - and for this row that instant lands at the tail of the BIOS's vblank work.
+
+**Fixed in r6** (`tools/phase12_disp_line.py`): the display decision excludes V_CNT 0x1FF. The line is
+still rendered for sprite prefetch, exactly as the old VDP does.
+
+**Held back, worth doing if artefacts persist.** The 32X's `YSO_N` is not blanked outside the 32X's own
+display window, while its R/G/B are (`VDP.sv:499-501` vs `:508`). During the 32X's vertical blank
+`PIX_COLOR` holds the previous frame's last pixel and `FS` is re-latched every vblank, which gives
+`PIX_COLOR[15]` - and therefore the overlay select - an exact two-frame period. The general fix is
+
+```systemverilog
+wire s32x_disp = |MODE & HDISP[2] & ~VBLK;    // the 32X is actually showing a pixel here
+assign YSO_N = ~((PRI ^ PIX_COLOR[15]) & s32x_disp) & (YS_N_SYNC | ~s32x_disp);
+```
+
+which subsumes r4's `~|MODE` term. It is NOT in r6 because it changes behaviour on the working 32X path
+(six cartridges plus CD32X), and r4's narrower fix may already be enough. Note also that srg320's own
+32X core gates its overlay with `|| !s32x_rom` (S32X.sv:885). **Do not copy that here**: a CD32X title
+has no cartridge - the 32X code arrives from the disc - so `s32x_rom` would be 0 and the gate would
+break Night Trap.
