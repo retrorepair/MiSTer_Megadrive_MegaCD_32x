@@ -780,3 +780,17 @@ SDRAM busy) only for cartridge-space cycles, and leave it low for the Mega CD wi
 for the gate array. Then revert `MD_ROM_PASS` so the 32X only owns its own window, as upstream does.
 This was NOT attempted tonight: every tier works, and it is a structural change to the bus that deserves a
 fresh session rather than a 3am edit to a working build.
+
+## 2026-09-10 ~02:15 — RELEASE r1
+
+`releases/MegaCD_MD_MCD_32X_r1.rbf` (telemetry compiled out) and
+`releases/MegaCD_MD_MCD_32X_r1_debug_telemetry.rbf` (same RTL, DDR3 telemetry beats enabled for debugging).
+
+- **Timing closes completely**: every clock positive (+0.52 clk_sys, +0.54 clk_ram, +0.54 pll_hdmi), zero
+  total negative slack, no "timing requirements not met". 32,145 ALMs (77 %), 4,130,382 memory bits (73 %).
+- Verified on hardware, nine tests, screenshots `core/shots/r_*.png`: Mega CD BIOS (clean logo animation),
+  Alien 3, 3 Ninjas gameplay, Doom, Virtua Racing Deluxe, **Knuckles Chaotix in gameplay**, After Burner
+  Complete, Space Harrier, Night Trap FMV.
+
+To re-enable telemetry set `TELEMETRY = 1` in `core/rtl/s32x_ddr.sv` and rebuild; read it with
+`python3 /media/fat/hpsmem.py read 30200000 8` (counters) and `... 30200008 8` (audio peaks).
