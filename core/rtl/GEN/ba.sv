@@ -290,6 +290,18 @@ module BA
 									mstate <= MBUS_FINISH;
 								end
 								
+								// Anything else inside the I/O area ($A10000-$A1FFFF) still has to TERMINATE. On the
+								// real console that whole area is answered by the I/O chip, so an unmapped
+								// address there returns open bus and the cycle ends; MBUS_NOT_USED instead waits
+								// for an external /DTACK that nothing will ever drive, and the machine locks up.
+								// mcd-verificator reads $A11FFC during "System init..." and hung here for ever
+								// (found by the bus-stall probe, tools/phase4_bushang_probe.py). Any game reading
+								// an unmapped I/O address would have locked up the same way.
+								else if (M68K_A[23:16] == 8'hA1) begin
+									M68K_MBUS_DTACK_N <= 0;
+									mstate <= MBUS_FINISH;
+								end
+
 								else begin
 									mstate <= MBUS_NOT_USED;
 								end
