@@ -832,3 +832,16 @@ previous project's notes, on upstream srg320 MegaCD (fpgagen MD, where it reache
 
 Six of six 32X cartridges, six of six Mega CD discs, the CD32X title and the MD cartridge. Nothing tested
 has failed to run.
+
+### Second negative result: address-based GEN_VDI does not fix the verificator either
+Branch `vdi-mux-experiment`. Selecting the MD's data source by address (`EXT_ROM_N`, `GEN_RAS2_N`,
+`EXT_FDC_N`) instead of by `~S32X_DTACK_N` - which removes the audit's "a phantom 32X cycle can hijack an
+in-flight Mega CD read" hazard - still hangs at "System init...". Timing stays clean (+0.30 clk_sys,
++0.38 clk_ram).
+
+So for the verificator, all four cheap hypotheses are now eliminated: region, the /FDC DTACK wait,
+cartridge-cycle termination (MEM_RDY), and the data-source mux. **Stop guessing.** The next step should be
+instrumentation, not another guess: capture the MD bus state when it stops - latch `MBUS_A`, the
+strobes and which DTACK sources are asserted into a telemetry beat when no cycle has completed for N
+clocks, then read it with `hpsmem.py`. That will say exactly which address never terminates, in one build
+instead of five.
