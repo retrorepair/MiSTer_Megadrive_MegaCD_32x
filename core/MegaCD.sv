@@ -231,6 +231,7 @@ localparam CONF_STR = {
 	"H2O[61],Enable SPR,Yes,No;",
 	"H2O[62],MCD RAM,Banks 2&3,Banks 0&1;",
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
+	"H2O[39],MCD /AS,Bus(hw),68000;",
 	"H2-;",
 	//"R1,Reset;"
 	"R0,Reset & Eject CD;",
@@ -597,7 +598,11 @@ MCD MCD
 	.EXT_VA(GEN_VA[17:1]),
 	.EXT_VDI(GEN_VDO),
 	.EXT_VDO(MCD_DO),
-	.EXT_AS_N(GEN_M68K_AS_N),
+	// Which strobe the gate array latches Word RAM data with. The arbiter's /AS is what the hardware
+	// presents, because on a real bus /AS is driven by whichever master owns it, the VDP included
+	// during DMA. Debug bit 39 switches back to the 68000's own /AS for comparison.
+	// See tools/phase11_as_select.py.
+	.EXT_AS_N(status[39] ? GEN_M68K_AS_N : GEN_AS_N),
 	.EXT_RNW(GEN_RNW),
 	.EXT_LDS_N(GEN_LDS_N),
 	.EXT_UDS_N(GEN_UDS_N),
