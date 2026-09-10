@@ -34,13 +34,15 @@ work. "Gameplay" means interactive play was reached; anything else says how far 
 | 32X cartridge | Doom | title and menu |
 | 32X cartridge | After Burner Complete, Space Harrier, Virtua Racing Deluxe | attract / in-game 3D |
 | 32X cartridge | Star Wars Arcade | intro |
-| **CD32X** | Night Trap | **live full-motion video through the 32X frame buffer** |
+| **CD32X** | Night Trap, Corpse Killer, Supreme Warrior | **live full-motion video through the 32X frame buffer** |
+| **CD32X** | Slam City with Scottie Pippen | **interactive level-select menu** |
 
-Sixteen titles, all four tiers. Nothing that has been tried has failed to run.
+All four tiers run. The CD32X tier, the one no other core can do at all, now has three titles playing
+video and a fourth reaching an interactive menu.
 
-That is a narrow sample and the numbers should be read as such: **one** Mega Drive cartridge, **one**
-CD32X title, and of the six CD32X titles named as the original acceptance target only Night Trap has
-ever been loaded. Corpse Killer, Slam City, Supreme Warrior, Surgical Strike and Fahrenheit are untested.
+Read the sample size honestly: only **one** Mega Drive cartridge has been tested, and only one Mega CD
+disc and one 32X cartridge have reached actual gameplay. Two titles are known NOT to run, listed under
+[Known gaps](#known-gaps).
 
 **Soak:** twelve minutes of Night Trap with the liveness counter advancing at every one of 24 samples
 and all 24 frames distinct; ten minutes of 3 Ninjas in gameplay with 18 of 20 frames distinct. Roughly
@@ -154,6 +156,10 @@ CEGen-produced 50 MHz enable, rather than upstream's 13.42 MHz which was 7.4% fa
   bus, as the console's I/O decoder does. `$A15000-$A15FFF` is deliberately excluded, because the
   console leaves that window unacknowledged so a cartridge can answer it — which is exactly how the 32X
   answers its own registers.
+- **CRAM dots** are modelled behind an OSD switch, defaulted off. Writing the palette during active
+  display puts the written value on screen for that pixel on real hardware; the VDP this core uses
+  had no such path, so the artefact never appeared at all.
+
 
 **Known deviations, stated up front:**
 
@@ -221,7 +227,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 |---|---|
 | Night Trap streaming disc video through the 32X frame buffer | **Done** — live FMV, 12-minute soak |
 | Tune SDRAM port priorities and frame-buffer prefetch | **Done** |
-| Acceptance: all six CD32X titles boot and play | **Not met** — 1 of 6 tested; interactive gameplay not reached |
+| Acceptance: all six CD32X titles boot and play | **Partial** — Night Trap, Corpse Killer and Supreme Warrior play video, Slam City reaches an interactive menu, Surgical Strike does not boot, Fahrenheit untested |
 
 ### Phase 5 — hardening and accuracy
 
@@ -232,7 +238,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | DDR3 telemetry technique for live state | **Done** — and it found three of the hard bugs |
 | 32X test ROMs (SH-2 timing, PWM) | **Not done** |
 | Verificator for the MD/MCD side | **Open** — traced to a 68000 address error, root cause not yet found |
-| Audio verified by listening | **Not done** — only by telemetry peak levels |
+| Audio verified by listening | **Done** — confirmed correct by ear across the tiers heard |
 | Backup RAM / SRAM save and load tested | **Not done** |
 
 ### Contingencies that turned out not to be needed
@@ -258,9 +264,15 @@ Read this before trusting the core with anything important.
   sub-CPU program upload runs, then the 68000 takes an **address error**, whose ROM handler is a bare
   `rte` that cannot unwind the 68000's 14-byte fault frame, so the program counter is lost. The odd
   address that triggers it has not yet been identified. No released game has shown this.
-- **Audio has never been verified by listening.** Telemetry shows non-zero peak levels on the console
-  mix, the Mega CD PCM/CDDA and the 32X PWM, and the sample-enable counter advancing, so no tier is
-  silent or clock-dead. That is not the same as sounding right.
+- **Doom CD32X Fusion does not boot.** The first real title found that drives the Mega CD from a
+  cartridge, which is "mode 1" — the same path mcd-verificator fails on, so the two are very likely one
+  defect. Its CD init times out after about 2.6 seconds and carries on as though no disc were present,
+  so the symptom is a black screen with a perfectly healthy 32X rather than a crash. Region, ROM size,
+  disc sector format and load order have all been ruled out.
+- **Surgical Strike did not boot**, and **Fahrenheit is untested** — only its disc 2 was tried, and
+  disc 1 is the key disc that boots.
+- **A 32X horizontal offset is under investigation.** Night Trap's intro video has been seen sitting
+  well to the left, but not reproducibly, and not in every region. Parked.
 - **Saves are untested.** Backup RAM and cartridge SRAM/EEPROM save and load paths exist and are wired,
   but no save has been written and read back.
 - **The Backup RAM *cartridge* is not modelled.** The "Internal+Cart" OSD option now covers only the
