@@ -2031,3 +2031,56 @@ Next steps, in order:
 
 r31 is NOT promoted and on this evidence has no case: 1 of 5 against r30's 2 of 5 (small samples,
 no significant difference). It still closes a genuine latent race, so keep the commit.
+
+## Fusion's remaining ~50% boot failure: fully characterised, NOT yet fixed
+
+The hang mechanism is established beyond doubt and is NOT in dispute:
+
+```
+frame-buffer word at SH-2 0x24000200 reads 0xFFFFFFFF
+  -> numtextures = (short)LITTLELONG(...) = -1          (r_data.c R_InitTextures, via I_TempBuffer)
+  -> 02020538 mov.w @r10,r6 / 0202053E muls.w r11,r6 / 02020546 jsr memset
+  -> memset(ptr, 0, negative) takes the byte tail at 0201FD4C and never terminates
+  -> all 256 KB of 32X work RAM zeroed, including the slave's code (slave then runs zeros at 06005FCA)
+  -> black screen
+```
+
+Caller identified by hardware probe (tools/phase47), literals resolved from the ROM:
+0x0202C40C = "T_START", 0x0202C404 = "T_END", 0x02018EF4 = W_GetNumForName,
+0x06006BDE = numtextures, 0x0201FD18 = memset.
+
+Discriminator, perfect across 10 boots:
+    BLACK: FB0 @0x200 = FFFFFFFF (88% of a 16 KB sample still 0xFF), FB1 = 00000000
+    MENU : FB0 @0x200 = 00000000,                                    FB1 = 00000000
+
+### THREE MODELS TESTED AND KILLED - do not revisit without new evidence
+
+1. **SH-2 system-register read returns stale data** (missing SH_SYSREG_WAIT, IF.sv:158/504/640/1089
+   all commented out). DISPROVED by ModelSim on the real BSC.sv: CE_F/CE_R strictly alternate,
+   BS_N is low exactly one phi cycle, and the BSC samples DI one CE edge AFTER SH_REG_DO loads,
+   even with zero wait states. The commented-out lines are harmless. Do not "restore" them.
+
+2. **The 127.5 KB I_TempBuffer clear is slow enough to be cut by an FS flip.** DISPROVED by
+   experiment: making frame-buffer writes 2.3x faster (FIFO_FB_WAIT 5 -> 1) did not move the
+   failure rate at all (5/12 vs 8/12). Clear duration is not the driver. Reverted; it also cost
+   pll_hdmi timing.
+
+3. **Frame-select bank mismatch between the write and the read-back.** DISPROVED by direct
+   measurement of FS at both accesses (tools/phase51):
+       every FAILING boot had FS@write == FS@read
+       the only MISMATCHES (boots 10, 12) both SUCCEEDED
+   FBCR.FS == FS on every boot and MODE == 1 throughout, so it is not a latch or polarity fault
+   either.
+
+Also beware two counters that look like discriminators and are NOT - both are consequences of
+hanging early, not causes: the FS toggle count (161 on a failing boot vs ~864 on a good one) and
+the write count to word 0x100 (132 on every failure vs saturated 255 on every success). The game
+hangs at a fixed point in a deterministic path, so the same counts recur.
+
+### Still open
+Why that frame-buffer word is unwritten on ~half of boots. A separate CONFIRMED defect that has
+not been fixed and could still be relevant: the VDP frame-buffer write FIFO does not carry the
+buffer select (VDP.sv:198 queues {A[17:1],WE,DI}; FBD_FB = ~FS is sampled when the entry DRAINS),
+so writes queued before a flip commit to the buffer selected after it. It misdirects at most the
+8 entries in flight, which is why it was not pursued as the cause here - but it is wrong and
+fixing it needs VDPFIFO widened from 35 to 36 bits (32X_mem.sv, a fixed-width megafunction).
