@@ -630,6 +630,10 @@ MCD MCD
 	.PRG_RDY(~MCD_PRG_BUSY),
 	.DBG_EARLY_DTACK(status[28]),   // ungated: the A/B is driven by writing MegaCD.CFG, which cannot reach dbg_menu
 
+	.DBG_SRES(MCD_DBG_SRES),
+	.DBG_SBRQ(MCD_DBG_SBRQ),
+	.DBG_CFM(MCD_DBG_CFM),
+	.DBG_CFS(MCD_DBG_CFS),
 	.DBG_SECTOR_END(MCD_DBG_SECTOR_END),
 	.DBG_DEC_FRAME(MCD_DBG_DEC_FRAME),
 	.DBG_DEC_MID(MCD_DBG_DEC_MID),
@@ -853,6 +857,107 @@ wire [63:0] tel_md = {tel_md_cycles, tel_md_32xreg};
 // upstream, so the values themselves are the only thing left to look at.
 wire [63:0] S32X_COMM;
 wire [63:0] tel_comm = S32X_COMM;
+
+// Where the MD 68000 actually is, and whether it ever looks at COMM0 (tools/phase29_md_addr.py).
+// GEN_RNW distinguishes the read of $A15120 that d32xr's main_loop_handle_req does from the write
+// that every request handler ends with.
+reg [23:1] tel_md_addr;
+reg  [7:0] tel_md_a151off;
+reg [15:0] tel_cp0_rd, tel_cp0_wr;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_md_addr <= 0; tel_md_a151off <= 0; tel_cp0_rd <= 0; tel_cp0_wr <= 0;
+	end
+	else if (gen_as_d & ~GEN_AS_N) begin
+		tel_md_addr <= GEN_VA;
+		if (GEN_VA[23:8] == 16'hA151) begin
+			tel_md_a151off <= {GEN_VA[7:1],1'b0};
+			if (GEN_VA[7:1] == 7'h10) begin		// $A15120
+				if (GEN_RNW) tel_cp0_rd <= tel_cp0_rd + 16'd1;
+				else         tel_cp0_wr <= tel_cp0_wr + 16'd1;
+			end
+		end
+	end
+end
+wire [63:0] tel_mdaddr = {tel_md_addr, 1'b0, tel_md_a151off, tel_cp0_rd, tel_cp0_wr};
+
+// Freeze the master SH-2's last PCs the moment it enters the 32X BIOS exception trap at 0x13C
+// (tools/phase30_trap_trail.py). Sampling later only ever shows the trap itself; the instruction
+// that caused it is what matters, and it is gone by then. Only the low 28 bits are compared because
+// the pipeline's PC carries don't-care upper bits on some fetches.
+reg [31:0] trap_pc_d, trap_pc_1, trap_pc_2;
+reg        trap_hit;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		trap_pc_d <= 0; trap_pc_1 <= 0; trap_pc_2 <= 0; trap_hit <= 0;
+	end
+	else if (!trap_hit && S32X_MSH_PC != trap_pc_d) begin
+		trap_pc_2 <= trap_pc_1;
+		trap_pc_1 <= trap_pc_d;
+		trap_pc_d <= S32X_MSH_PC;
+		if ((S32X_MSH_PC & 28'hFFFFFFF) == 28'h000013C) trap_hit <= 1;
+	end
+end
+wire [63:0] tel_trap = {trap_pc_1, trap_pc_2};
+
+// Mega CD main/sub communication flags (tools/phase31_cd_handshake.py). Fusion's master is waiting
+// on play_cd_roq_file and no sectors are being delivered, so the question is whether the Mode-1
+// sub-CPU program it uploaded is answering at all.
+wire  [7:0] MCD_DBG_CFM, MCD_DBG_CFS;
+reg   [7:0] cfm_d, cfs_d;
+reg  [15:0] tel_cfm_chg, tel_cfs_chg;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		cfm_d <= 0; cfs_d <= 0; tel_cfm_chg <= 0; tel_cfs_chg <= 0;
+	end
+	else begin
+		cfm_d <= MCD_DBG_CFM;
+		cfs_d <= MCD_DBG_CFS;
+		if (MCD_DBG_CFM != cfm_d) tel_cfm_chg <= tel_cfm_chg + 16'd1;
+		if (MCD_DBG_CFS != cfs_d) tel_cfs_chg <= tel_cfs_chg + 16'd1;
+	end
+end
+wire [63:0] tel_cd = {MCD_DBG_CFM, MCD_DBG_CFS, tel_cfs_chg, tel_cfm_chg, 16'h0000};
+
+// Why the sub-CPU stopped (tools/phase32_subcpu_halt.py). Its address bus and strobes are already
+// brought out for the PRG-RAM latency probe; this adds the gate array's hold signals and a bus-cycle
+// count, which separates "held by the 68000" from "stalled waiting for an acknowledge".
+wire        MCD_DBG_SRES, MCD_DBG_SBRQ;
+reg  [31:0] tel_sub_cycles;
+reg         sub_as_d = 1;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_sub_cycles <= 0; sub_as_d <= 1;
+	end
+	else begin
+		sub_as_d <= MCD_DBG_AS_N;
+		if (sub_as_d & ~MCD_DBG_AS_N) tel_sub_cycles <= tel_sub_cycles + 32'd1;
+	end
+end
+// What the 68000 writes to the gate array (tools/phase33_a12_writes.py). Captured on the raw MD
+// bus so it is independent of the Mega CD decode: SRES is only ever set by an LDS write of bit 0 to
+// $A12001, and it is stuck at 0 while the sub-CPU is held.
+reg  [7:0] tel_a12_off;
+reg [15:0] tel_a12_data;
+reg [19:0] tel_a12_wr, tel_a12_rd;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		tel_a12_off <= 0; tel_a12_data <= 0; tel_a12_wr <= 0; tel_a12_rd <= 0;
+	end
+	else if (gen_as_d & ~GEN_AS_N && GEN_VA[23:8] == 16'hA120) begin
+		if (GEN_RNW) tel_a12_rd <= tel_a12_rd + 20'd1;
+		else begin
+			tel_a12_wr   <= tel_a12_wr + 20'd1;
+			tel_a12_off  <= {GEN_VA[7:1],1'b0};
+			tel_a12_data <= GEN_VDO;
+		end
+	end
+end
+wire [63:0] tel_a12 = {tel_a12_off, tel_a12_data, tel_a12_wr, tel_a12_rd};
+
+wire [63:0] tel_sub = {MCD_DBG_A[23:1], 1'b0,
+                       MCD_DBG_SRES, MCD_DBG_SBRQ, MCD_DBG_AS_N, MCD_DBG_DTACK_N, MCD_DBG_RNW, 3'b000,
+                       tel_sub_cycles};
 
 audio_fix #(250) audio_fix // MCLK/504 in lpf, so choose half to get in the middle of sample period
 (
@@ -1080,7 +1185,12 @@ s32x_ddr s32x_ddr
 	.tel_sector(tel_sector),
 	.tel_sh2pc(tel_sh2pc),
 	.tel_md(tel_md),
-	.tel_comm(tel_comm)
+	.tel_comm(tel_comm),
+	.tel_mdaddr(tel_mdaddr),
+	.tel_trap(tel_trap),
+	.tel_cd(tel_cd),
+	.tel_sub(tel_sub),
+	.tel_a12(tel_a12)
 );
 
 always @(posedge clk_sys) begin

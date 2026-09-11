@@ -1546,3 +1546,59 @@ and its own sub-CPU program is incbin'd in the cart ROM (`src-md/cd.s`), so the 
 starts it - full Mode 1. jgenesis does NOT support CD32X at all (jsgroth, issues #148/#673), so there
 is no reference implementation for this combination; issue #701 is Fusion-specific and was filed by
 the d32xr author.
+
+## Fusion, traced to a 68000 <-> master SH-2 deadlock on COMM0 (not yet fixed)
+
+Instrumentation added across r13-r19: both SH-2 PCs, MD 68000 address bus, MD `$A151xx` and `$A120xx`
+traffic with read/write counts, 32X comm registers + PWM status, Mega CD comm flags, and sub-CPU
+halt state. Readers: `tools/mister/pcsample.py`, `scratch/both.py`, `scratch/halt.py`, `scratch/a12.py`.
+SH-2 disassembly via `tools/dis_sh2.py` (capstone SH-2), 68000 via `tools/dis68k.py`.
+
+### State when Fusion is hung (all measured, r19)
+```
+68000     spins at $884C08 in Fusion's MD code ($880000 window = ROM offset 0x4C08)
+          reads $A15120 (COMM0) at >100k/s, waiting for BIT 0 to be set
+          $A120xx traffic COMPLETELY FROZEN (writes 1461, reads 2080, no movement)
+master    spins at 0201CBC2..C8 - a cache-purge loop (r12 = (r5+8) | 0x40000000, stride 16)
+slave     spins at 0201E5CE..DE - "wait while bit 15 set, then push"
+sub-CPU   SRES=0 SBRQ=1, /AS idle, zero PRG-RAM reads: HELD, not stalled
+          stops at a different address every run (007C40, 00A03E, 005E76)
+CP0R      0x2E00 or 0x2054 depending on run; 0x2E = prireqtbl[46] = play_cd_roq_file
+CFM/CFS   00/00, both static.  SECTOR_END and CDD_SEND static (HOCK=0)
+```
+
+**The sub-CPU being held is deliberate and downstream**: the last `$A120xx` write was `$A1200E = 0101`
+(a comm flag), and `$A12001` was written `0x02` before that to halt it for a transfer. The 68000 then
+got stuck waiting on the 32X and never released it. Do not chase the sub-CPU halt as the root cause -
+that was a wrong turn, corrected by the `$A120xx` write capture showing zero traffic.
+
+### Positively cleared
+- **Region lock** - was the original "crash": `ERROR! THIS IS A PAL/SECAM-COMPATIBLE MEGA-CD`. Fixed
+  for testing with a US `cd_bios.rom` beside the Fusion files.
+- **The CD32X tower** - Night Trap runs perfectly on the same build, 75 sectors/s.
+- **Our 32X core** - plain Doom 32X renders its full title screen on the same build.
+- **PWM FIFO** - `LMD=1 RMD=1`, FIFO reads EMPTY. The phase28 fix (drain regardless of output mode,
+  as PicoDrive does) is real and worth keeping, but is NOT this bug. Held, unapplied.
+- **The 0x13C BIOS trap** - intermittent; `trap_hit` was 0 in the failing runs, so the master is
+  genuinely spinning in game code, not trapped.
+- **Debug bit 39** (EXT_AS_N source) - A/B'd both ways, identical result.
+- **Every 32X register path** - CP0R..CP7R both directions, PWM block, DCR.RV, BSR banking,
+  ICR/CMD interrupt generation, MD register write decode: byte-identical to pristine upstream.
+- **Cache purge area** - `CACHE.sv:48 PURGE_AREA = (CBUS_A[31:29] == 3'b010)` is implemented, so the
+  master's purge loop is legitimate game code.
+
+### Where to go next
+The deadlock is 68000 (waiting for COMM0 bit 0) against the master SH-2 (purging cache in a loop,
+i.e. polling memory another CPU should have written). One side missed a signal. The open question is
+what the 68000's `$884C08` loop is really waiting for - `(a6)` was assumed to be `$A12000` and that
+is now disproved, so re-derive `a6` by disassembling backwards from `$884C08` to find where it is
+loaded, rather than guessing from which registers are busy.
+
+### Reference notes
+- **jgenesis does NOT support CD32X at all** (jsgroth, issues #148/#673) - no reference for this
+  combination. Issue #701 is Fusion-specific, filed by d32xr's own author.
+- **PicoDrive (notaz) is the only CD32X emulator** - `pico/32x/pwm.c`, `pico/32x/memory.c` are the
+  reference for 32X behaviour.
+- d32xr names comm registers by BYTE OFFSET: its COMM0/COMM2/COMM4 are `$A15120`/`$A15122`/`$A15124`
+  = our `CP0R`/`CP1R`/`CP2R`. `CP4R` is `$A15128`. This cost an hour.
+- Fusion's Mode 1 init and its `prireqtbl` command table are in `src-md/scd.c` and `src-md/crt0.s`.

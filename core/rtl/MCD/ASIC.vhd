@@ -52,7 +52,11 @@ entity ASIC is
 		PRG_OE_N			: out std_logic;
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
-		DBG_EARLY_DTACK: in std_logic;		-- 1 = acknowledge the sub-CPU when the SDRAM accepts the
+		DBG_EARLY_DTACK: in std_logic;
+		DBG_SRES			: out std_logic;						-- tools/phase32_subcpu_halt.py
+		DBG_SBRQ			: out std_logic;
+		DBG_CFM			: out std_logic_vector(7 downto 0);	-- tools/phase31_cd_handshake.py
+		DBG_CFS			: out std_logic_vector(7 downto 0);		-- 1 = acknowledge the sub-CPU when the SDRAM accepts the
 														-- request rather than when the data is back (reference
 														-- core timing). See tools/phase18_prgram_dtack.py.
 
@@ -830,6 +834,14 @@ begin
 			end case;
 		end if;
 	end process;
+
+	-- sub-CPU reset and bus request, $A12001 bits 0 and 1
+	DBG_SRES <= SRES;
+	DBG_SBRQ <= SBRQ;
+
+	-- the gate array's communication flags, $A1200E / $A1200F
+	DBG_CFM <= CFM;
+	DBG_CFS <= CFS;
 
 	EXT_DTACK_N <= M68K_REG_DTACK_N and M68K_PRGRAM_DTACK_N and M68K_WORDRAM_DTACK_N and M68K_ROM_DTACK_N;
 	EXT_VDO <= M68K_REG_DO when M68K_REG_DTACK_N = '0' else
