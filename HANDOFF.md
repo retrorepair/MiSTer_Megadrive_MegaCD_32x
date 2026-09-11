@@ -1643,3 +1643,47 @@ of the 64 status bits is claimed), `tools/mister/pcsample.py`, `tools/mister/sh2
 beats 0-12: 32X DDR3 counters, audio peaks, sub-CPU PRG-RAM latency, drive sector rates, both SH-2
 PCs, MD 68000 address + `$A151xx`/`$A120xx` traffic, 32X comm registers + PWM, Mega CD comm flags,
 sub-CPU halt state, and the master's pre-trap PC trail.
+
+## BREAKTHROUGH: Fusion says what is wrong. It cannot read its data from the CD.
+
+The master SH-2 ends up spinning at `0201955A`, which is `bra 0x201955a` / `nop` - **Fusion's own panic
+handler**, not a deadlock:
+
+```
+02019524  <panic(msg)>  takes the message in r4, formats 84 bytes on the stack,
+02019532                calls 0x0200CED8 (vsnprintf), 0x02019488, 0x02018FB0, 0x02018400
+0201955A  bra .         then HANGS DELIBERATELY
+```
+
+The formatted message is on the SH-2 stack, and the SH-2 stack is in work RAM, which is in HPS DDR3 -
+so it can be read straight out of Linux. Dumping `0x3003F000` and un-swapping (the engine stores
+SH-2 16-bit words byte-swapped, in 8-byte groups) gives:
+
+```
+"R_InitDa" "ta: 1006" "91256 >=" " numlump"   ->   R_InitData: <n> >= numlumps
+```
+
+Confirmed against the ROM at `0x02C5CF`: the format string is `"%s: %i >= numlumps"`, and
+`R_InitData` is at `0x02C860`. That is Doom's WAD lump-bounds check failing - the lump index is past
+the end of the directory, i.e. **the WAD it loaded from the CD is missing or wrong**.
+
+Corroborated by the sector telemetry: **SECTOR_END reached only 34 and then stopped.** ~80 KB is
+nowhere near a WAD. The CD read starts and dies.
+
+**So the remaining bug is the Mega CD Mode-1 file read, not a 32X problem at all.** Everything else -
+the 68000 waiting at `$884C08`, the slave spinning, `fbd_wr` frozen, the black screen - is downstream
+of the panic. `tools/mister/scan.py` dumps and un-swaps work RAM; reuse it, this technique is general.
+
+### Cleared while getting here
+- `rom_download = bios_download | cart_download` (MegaCD.sv:369) does NOT include CD data, so sector
+  transfers do not reset the Mega CD block. Identical to the reference.
+- The SH-2 ROM latch fix (r21/r22) is real and helps - no `0x13C` traps in 4 runs where the previous
+  build trapped 2 of 3 - but it is not what keeps Fusion black.
+- r21's timing failure was on `pll_hdmi` only (the HDMI scaler); the core's own clocks had +0.750 ns,
+  so its functional results were valid. r22 closes everything at +0.588 ns with telemetry off.
+
+### Next
+Find why the sub-CPU ends up held at SRES=0/SBRQ=1 with the 68000 no longer touching `$A120xx`.
+`SRES` is only cleared by an MD LDS write of bit 0 to `$A12001` (ASIC.vhd:616) or by the ASIC's own
+`RST_N`, and both have been checked. Capture the $A12001 write VALUE history (not just the last one)
+to see the actual sequence, and correlate with where the 34 sectors stop.
