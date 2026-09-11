@@ -965,7 +965,18 @@ begin
 					CDD_FRAME_CNT <= (others => '0');
 				elsif CLK_12M_F = '1' then
 					if CDD_FRAME_CNT = 166666 then
-						CDD_SEND <= '1';
+						-- Only poll while the command register holds CD_COMM_IDLE (0). Main_MiSTer
+						-- re-EXECUTES whatever is in the command registers on every request toggle
+						-- (megacd.cpp mcd_poll: cdd.SetCommand(); cdd.CommandExec()), and
+						-- CD_COMM_PLAY re-seeks to the LBA it carries (megacdd.cpp CommandExec).
+						-- Handing a live PLAY over again each frame therefore drags the drive back
+						-- to the start of the read ~75 times a second and the file never advances:
+						-- Doom CD32X Fusion got 34 sectors and then stalled for ever. IDLE is
+						-- idempotent - it only reports status - so periodic polling still does what
+						-- it was added for (CDC INIT, and software that sets HOCK then only polls).
+						if CDDC(3 downto 0) = x"0" then
+							CDD_SEND <= '1';
+						end if;
 						CDD_FRAME_CNT <= (others => '0');
 					else
 						CDD_FRAME_CNT <= CDD_FRAME_CNT + 1;

@@ -1687,3 +1687,46 @@ Find why the sub-CPU ends up held at SRES=0/SBRQ=1 with the 68000 no longer touc
 `SRES` is only cleared by an MD LDS write of bit 0 to `$A12001` (ASIC.vhd:616) or by the ASIC's own
 `RST_N`, and both have been checked. Capture the $A12001 write VALUE history (not just the last one)
 to see the actual sequence, and correlate with where the 34 sectors stop.
+
+## The Mode-1 file read: we were re-issuing a live CDD command every frame
+
+Main_MiSTer owns the drive. Its poll loop treats **every toggle of the core's request line as a NEW
+command** (`Main_MiSTer/support/megacd/megacd.cpp`, `mcd_poll`):
+
+```c
+uint8_t req = spi_uio_cmd_cont(UIO_CD_GET);
+if (req != last_req) { ... cdd.SetCommand(c, 0); cdd.CommandExec(); has_command = 1; }
+```
+and `CommandExec` re-seeks for a play (`support/megacd/megacdd.cpp`):
+```c
+case CD_COMM_PLAY:
+    MSFToLBA(&lba_, comm[2]*10+comm[3], ...);  lba_ -= 150;
+    SeekToLBA(lba_, 1);          // back to the LBA still sitting in the command registers
+    this->status = CD_STAT_PLAY;
+```
+Main advances the drive on its **own** 75 Hz timer (`poll_timer = GetTimer(13...)`), one sector per
+`cdd.Update()`. The request line is only ever meant to mean "here is a new command".
+
+`ASIC.vhd` handed the command registers over **once per 75 Hz frame** as well as on a write to
+`$FF804A`. While a PLAY is still in those registers that makes Main seek back to the start of the
+read ~75 times a second, so a file transfer never advances - **SECTOR_END reached 34 and stopped**,
+the WAD never loaded, and Fusion panicked with `R_InitData: <n> >= numlumps`.
+
+Titles that boot from the disc under the BIOS are unaffected: well-behaved software leaves
+`CD_COMM_IDLE` (0x00) in the command registers between commands and IDLE is idempotent, which is why
+Night Trap streams at 75 sectors/s on the same build.
+
+**Fix (r24, `tools/phase36_cdd_idle_poll.py`)**: still send on a command write - that is the real
+event and what Main expects - but only poll periodically while `CDDC(3 downto 0) = 0` (IDLE). That
+keeps the reason the periodic send was added (mcd-verificator's CDC INIT hang, and software that sets
+HOCK then only polls status) without ever re-issuing a live command.
+
+**This one is ours**, not upstream: the periodic send was added here to fix CDC INIT and it broke
+file reads. ares confirms the intended model - `MCD::CDD::clock()` runs at a strict 75 Hz and only
+raises the IRQ via `statusPending`; `process()` runs once, on the command write.
+
+### The disc is fine - checked, not assumed
+`tools/../scratch/isoinfo.py` lists the image: valid ISO9660 "DOOM CD32X FUSION", DOOM.WAD (506
+lumps), DOOM_II.WAD (458), MAPDEV.WAD (1397), RESURRECTION.WAD (344), SOUNDS.WAD (88), TNT_MINI.WAD
+(120), plus VGM_* and VIDEO/IDLOGO.ROQ (1.5 MB - the id logo, which is what `play_cd_roq_file`
+command 0x2E goes after). Fusion ships its own converted PWADs, so a user's DOOM.WAD is not used.
