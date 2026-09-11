@@ -1947,3 +1947,39 @@ changes. The SH-2 then waits on the MD's busy and captures the MD's word, from t
 r30 does NOT fix this: the handshake now waits for ROM_WAIT to rise, but ROM_WAIT does rise - from
 the MD's access. This is a real latent bug and is the top remaining technical item. If rom_sz > 4 MB
 (cart.sv:85,231 set ROM_LIN_EN) it would run almost continuously.
+
+## r30 validation sweep, and r31 tested
+
+**r30 — the shipped build. Verified:**
+
+| test | result |
+|---|---|
+| Fusion, 8 consecutive boots | 8/8 clean, RoQ intro reaching EOF every run, 0 wild jumps |
+| Fusion, 10 min instrumented soak | **0 of 20 samples faulted** |
+| 13-title sweep | all clean and rendering |
+| mcd-verificator | unchanged: VAR TESTS 02, IRQ TEST (09, was 06), REG 8030 07, CDC FLAGS 40 |
+
+Titles swept, all `JUMP: clean` and animating: chaotix (a known crash - **now fine**, intro renders
+correctly), vrdx, doom, fusion, cd_nighttrap, cd_corpse, cd_fahrenheit, cd_slamcity, ninjas,
+m_afterburner, m_batman, g_cobra, g_ewj. `g_ewj` reported FROZEN but that is a false positive - the
+static SEGA licence screen during a CD load, with the drive streaming at 58 sectors/s.
+
+During the soak the master moves from cart-ROM menu code (0201xxxx) to work-RAM engine code
+(0600xxxx) at ~2.5 min and stays there, which is the attract-mode demo starting. The user saw "the
+demo ran for a while then dumped me on a random level" - that is Doom's demo loop, not a fault.
+
+**r31 (`phase44`, the strobe leak) - TESTED, equal to r30:**
+
+- 8 of 8 Fusion boots clean, RoQ EOF every run
+- 6-title sweep clean (chaotix, vrdx, doom, fusion, cd_nighttrap, ninjas)
+
+One sweep sample showed garbage PCs and a black screen; **eleven subsequent boots were all clean**,
+so that was a flake in the sweep's fixed 24 s sample landing on a slow load, not a regression. Do not
+condemn a build on one sample - the sweep's timing is not reliable enough for that.
+
+r31 is NOT promoted. It tests equal to r30 and closes a real latent race, but the race produces rare,
+plausible-looking wrong data that these tests cannot detect, so there is no measured improvement to
+justify displacing the build that has the soak time. PP = r30, PQ = r31. The user's call.
+
+Both are pushed on branch `phase18-dtack`; r31's commit is titled UNTESTED and that is now stale -
+it has been tested, just not soaked.
