@@ -131,13 +131,22 @@ reg  [4:0] ram_req_d2 = 0;
 wire [4:0] wr = {wrl4|wrh4,wrl3|wrh3,wrl2|wrh2,wrl1|wrh1,wrl0|wrh0};
 wire [4:0] rd = {rd4,rd3,rd2,rd1,rd0};
 
+// `dout` stays exactly as it was: ONE register with ONE load on SDRAM_DQ. That input path is
+// tight and fanning it out to five enabled registers kills the capture outright (built as r28:
+// both SH-2s dead, no $A151xx traffic). The per-port split below happens a cycle later instead.
 reg [15:0] dout;
 
-assign dout0 = dout;
-assign dout1 = dout;
-assign dout2 = dout;
-assign dout3 = dout;
-assign dout4 = dout;
+// One register PER PORT (tools/phase42_sdram_per_port_dout.py). Sharing `dout` across all five let
+// any port's read overwrite another's data before its consumer sampled it, corrupting 68000 and
+// SH-2 instruction fetches whenever the Mega CD was active.
+reg [15:0] dout_p0, dout_p1, dout_p2, dout_p3, dout_p4;
+reg  [4:0] dout_sel;
+
+assign dout0 = dout_p0;
+assign dout1 = dout_p1;
+assign dout2 = dout_p2;
+assign dout3 = dout_p3;
+assign dout4 = dout_p4;
 
 localparam [9:0] RFS_CNT = 766;
 
@@ -228,6 +237,16 @@ always @(posedge clk) begin
 		active <= 0;
 		ram_req <= 0;
 	end
+
+	// Hand the captured word to the port that asked for it, one cycle after the capture. ram_req is
+	// one-hot for the port being served, and busy (ram_req | ram_req_d | ram_req_d2) stays high for
+	// three cycles after STATE_READY, so this lands two cycles before any consumer samples.
+	dout_sel <= (state == STATE_READY) ? ram_req : 5'd0;
+	if (dout_sel[0]) dout_p0 <= dout;
+	if (dout_sel[1]) dout_p1 <= dout;
+	if (dout_sel[2]) dout_p2 <= dout;
+	if (dout_sel[3]) dout_p3 <= dout;
+	if (dout_sel[4]) dout_p4 <= dout;
 
 	if(mode != MODE_NORMAL || state != STATE_IDLE || reset) begin
 		state <= state + 1'd1;

@@ -683,7 +683,13 @@ module S32X_IF
 			end
 
 			//PWM
-			if (PWMCR.LMD || PWMCR.RMD) begin
+			// The FIFO must keep draining even with the L/R output mode off, or a title that queues
+			// samples before enabling output leaves FULL latched and any SH-2 spinning on it hangs -
+			// which is exactly where Doom CD32X Fusion's slave sits. PicoDrive (pico/32x/pwm.c,
+			// consume_fifo_do) advances the FIFO on elapsed cycles alone and its only guard is a
+			// non-zero cycle register; the output mode is never consulted. Audibility is handled
+			// separately at the DAC below, so nothing is heard while output is disabled.
+			if (|CYCR) begin
 				CYC_CNT_NEXT = CYC_CNT + 12'd1;
 				TIME_CNT_NEXT = TIME_CNT + 4'd1;
 			end else begin
@@ -694,7 +700,7 @@ module S32X_IF
 			if (CE_R) begin
 				PWM_OUT <= 0;
 				CYC_CNT <= CYC_CNT_NEXT;
-				if (CYC_CNT_NEXT == CYCR && (PWMCR.LMD || PWMCR.RMD)) begin
+				if (CYC_CNT_NEXT == CYCR && |CYCR) begin
 					CYC_CNT <= 12'd0;
 					TIME_CNT <= TIME_CNT_NEXT;
 					if (TIME_CNT_NEXT == PWMCR.TM) begin
@@ -772,7 +778,11 @@ module S32X_IF
 			else TMPR = RPW_DATA - {1'b0,CYCR[11:1]};
 
 			if (PWM_OUT) begin
-			if (!CYCR[11]) begin
+			if (!(PWMCR.LMD || PWMCR.RMD)) begin
+				// output disabled: the FIFO still drains (above), but nothing reaches the DAC
+				PWM_L <= '0;
+				PWM_R <= '0;
+			end else if (!CYCR[11]) begin
 				PWM_L <= {TMPL[11],TMPL[9:0],5'b00000};
 				PWM_R <= {TMPR[11],TMPR[9:0],5'b00000};
 			end else begin
@@ -853,7 +863,25 @@ module S32X_IF
 				end
 
 				RS_SH_WAIT: begin
-					if (/*(ROM_WAIT_SYNC || !USE_ROM_WAIT) &&*/ CE_F) begin
+						// Wait for the SDRAM to ACKNOWLEDGE the request before believing the bus. This
+						// qualifier was commented out, so this path advanced on a fixed CE_F timer - about
+						// 75-93 ns - without ever checking the request had been accepted. RS_MD_WAIT below
+						// has always waited for ROM_WAIT_SYNC; the asymmetry was the bug.
+						//
+						// It worked cartridge-only because sdram.sv is idle when the strobe arrives and
+						// takes the request within a clk_ram. With the Mega CD running, its BIOS ROM,
+						// PRG-RAM and PCM ports keep the controller busy and refresh is tested BEFORE
+						// port 0 (sdram.sv:161-167), so acceptance slips past the timer. RS_SH_READ was
+						// then entered with ROM_WAIT still low, captured the PREVIOUS port-0 word, and
+						// SH_ROM_CAP locked that stale value in - handing the SH-2 a wrong instruction or
+						// literal. That is the wild jump that has been crashing Doom CD32X Fusion.
+					if (ROM_WAIT_SYNC && CE_F) begin
+						ROM_ST <= RS_SH_READ;
+					end else if (!CART_EXT && CE_F) begin
+						// Nothing behind the connector answers this cycle, so ROM_WAIT can never rise and
+						// waiting on it would hang both SH-2s. Same escape as the RS_MD_WAIT deadlock fix:
+						// cart.sv ties the ROM write strobes off for a normal cartridge, so an SH-2 write
+						// into cartridge space makes no SDRAM request at all.
 						ROM_ST <= RS_SH_READ;
 					end
 				end
@@ -1085,8 +1113,10 @@ module S32X_IF
 	assign CDO = VDI_SYNC;
 	assign DBG_INT = {ICR, IMMR};
 
-	assign DBG_COMM = {CP0R, CP1R, CP2R,
-	                   LPWR.FULL, LPWR.EMPTY, RPWR.FULL, RPWR.EMPTY, PWMCR[11:0]};
+	// CP4R is $A15128 / MARS_SYS_COMM8, the register d32xr streams RoQ video over
+	// (bit 0 MARS_ROQFL_REQ, bit 2 EOF, bit 3 NOD, bit 4 STP). The PWM FIFO fields that were
+	// here confirmed the r25 drain fix and are no longer needed.
+	assign DBG_COMM = {CP0R, CP1R, CP2R, CP4R};
 
 	assign CASEL_N = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_CE0 : ASEL_N_SYNC;
 	assign CLWR_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_LWR : LWR_N_SYNC[0];

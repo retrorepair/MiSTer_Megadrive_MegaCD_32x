@@ -881,24 +881,38 @@ always @(posedge clk_sys) begin
 end
 wire [63:0] tel_mdaddr = {tel_md_addr, 1'b0, tel_md_a151off, tel_cp0_rd, tel_cp0_wr};
 
-// Freeze the master SH-2's last PCs the moment it enters the 32X BIOS exception trap at 0x13C
-// (tools/phase30_trap_trail.py). Sampling later only ever shows the trap itself; the instruction
-// that caused it is what matters, and it is gone by then. Only the low 28 bits are compared because
-// the pipeline's PC carries don't-care upper bits on some fetches.
-reg [31:0] trap_pc_d, trap_pc_1, trap_pc_2;
-reg        trap_hit;
+// Catch the master SH-2's wild jump itself (tools/phase41_jump_trail.py). The two-deep trail this
+// replaces only ever caught the walk through the vector table into the BRA-to-self trap at 0x13C
+// (0000013A -> 00000138 -> 0000013C), never the instruction that jumped. Latch on the TRANSITION
+// out of real code instead: PC[31:14]==0 is the low BIOS region, and once the game is up the master
+// has no business there. game_started gates out the legitimate boot-ROM execution after reset.
+reg [31:0] pc_d, pc_1, pc_2;
+reg [31:0] jump_from, jump_to, pc_ctx1, pc_ctx2;
+reg        jump_hit, game_started;
 always @(posedge clk_sys) begin
 	if (reset) begin
-		trap_pc_d <= 0; trap_pc_1 <= 0; trap_pc_2 <= 0; trap_hit <= 0;
+		pc_d <= 0; pc_1 <= 0; pc_2 <= 0;
+		jump_from <= 0; jump_to <= 0; pc_ctx1 <= 0; pc_ctx2 <= 0;
+		jump_hit <= 0; game_started <= 0;
 	end
-	else if (!trap_hit && S32X_MSH_PC != trap_pc_d) begin
-		trap_pc_2 <= trap_pc_1;
-		trap_pc_1 <= trap_pc_d;
-		trap_pc_d <= S32X_MSH_PC;
-		if ((S32X_MSH_PC & 28'hFFFFFFF) == 28'h000013C) trap_hit <= 1;
+	else if (S32X_MSH_PC != pc_d) begin
+		// cart ROM, work RAM, and their cache-through mirrors all count as real code
+		if (S32X_MSH_PC[27:24] == 4'h2 || S32X_MSH_PC[27:24] == 4'h6) game_started <= 1;
+		if (!jump_hit) begin
+			pc_2 <= pc_1;
+			pc_1 <= pc_d;
+			pc_d <= S32X_MSH_PC;
+			if (game_started && S32X_MSH_PC[31:14] == 18'd0 && pc_d[31:14] != 18'd0) begin
+				jump_hit  <= 1;
+				jump_to   <= S32X_MSH_PC;
+				jump_from <= pc_d;
+				pc_ctx1   <= pc_1;
+				pc_ctx2   <= pc_2;
+			end
+		end
 	end
 end
-wire [63:0] tel_trap = {trap_pc_1, trap_pc_2};
+wire [63:0] tel_trap = {jump_from, jump_to};
 
 // Mega CD main/sub communication flags (tools/phase31_cd_handshake.py). Fusion's master is waiting
 // on play_cd_roq_file and no sectors are being delivered, so the question is whether the Mode-1
@@ -971,7 +985,9 @@ always @(posedge clk_sys) begin
 		if (~S32X_INT[16] &  intm_d) tel_intm_clr <= tel_intm_clr + 16'd1;
 	end
 end
-wire [63:0] tel_int = {S32X_INT, tel_intm_set, tel_intm_clr};
+// repurposed by tools/phase41_jump_trail.py: the two PCs before the wild jump
+wire [63:0] tel_int = {pc_ctx1, pc_ctx2};
+wire unused_int = |{S32X_INT, tel_intm_set, tel_intm_clr};
 
 wire [63:0] tel_sub = {MCD_DBG_A[23:1], 1'b0,
                        MCD_DBG_SRES, MCD_DBG_SBRQ, MCD_DBG_AS_N, MCD_DBG_DTACK_N, MCD_DBG_RNW, 3'b000,

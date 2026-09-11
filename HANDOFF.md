@@ -1730,3 +1730,220 @@ raises the IRQ via `statusPending`; `process()` runs once, on the command write.
 lumps), DOOM_II.WAD (458), MAPDEV.WAD (1397), RESURRECTION.WAD (344), SOUNDS.WAD (88), TNT_MINI.WAD
 (120), plus VGM_* and VIDEO/IDLOGO.ROQ (1.5 MB - the id logo, which is what `play_cd_roq_file`
 command 0x2E goes after). Fusion ships its own converted PWADs, so a user's DOOM.WAD is not used.
+
+## r25/r26: the PWM drain fix clears the DMA deadlock, and the CD read is NOT the blocker
+
+**Fixed and shipped.** `releases/MegaCD_MD_MCD_32X_r26_pwmdrain_clean.rbf` (seed 3, timing clean,
+worst-case setup slack +0.107). r25 is the same source at seed 1 and misses by -0.057 on a
+`sdram|reset[4] -> SDRAM_DQ[0]~en` half-cycle path that has nothing to do with the change; the
+reseed was the whole fix for that.
+
+`tools/phase28_pwm_drain.py` — the PWM FIFO must keep draining with the L/R output mode off.
+PicoDrive's `consume_fifo_do()` (pico/32x/pwm.c) advances the FIFO on elapsed cycles alone and never
+consults the output mode; `IF.sv:685` halted the entire timebase when `LMD=RMD=0`. Measured on
+Fusion before and after:
+
+| | r24 | r26 |
+|---|---|---|
+| master SH-2 | `0201F8CC` forever | running game code |
+| PWMCR | `000` | `185` |
+| PWM FIFOs | `LF=1 RF=1` (full, latched) | `LF=0 RF=0` (draining) |
+
+The master was spinning on `mov.l @r3,r0 / tst #2,r0 / bt` with `r3 = 0xFFFFFF9C` — SH7604 DMAC
+CHCR1, bit 1 TE. Output mode off -> FIFO can't drain -> FULL latches -> DREQ never asserts -> the
+PWM DMA never completes -> TE never sets. That whole chain is gone.
+
+**The Mode-1 file read works.** This was the standing theory and it is wrong, established without
+touching the core: Main_MiSTer owns the drive, so its state is the ground truth. `cdd` is a global
+in a stripped binary, but its header is two consecutive `.text` pointers (`SendData`,
+`CanSendData`) after `loaded == 1`, which locates it uniquely; the layout then checks out against
+the real disc (`toc end=9485 last=1`, `track0 start=0 end=9485 type=1 sector_size=2048`).
+Tools: `scratch/cddpeek.py`, `scratch/cddfull.py`, `scratch/cddlog.py`.
+
+What that shows:
+- `mcd_can_send_data()` returns 1 unconditionally for `TT_MODE1`, so the core never throttles it.
+- The reads happen. `/proc/<MiSTer>/fdinfo` has the ISO's file pointer at sector 8940 — 339 sectors
+  into `VIDEO/IDLOGO.ROQ` (LBA 8601, 1501892 bytes). Fusion gets through boot, through the 32X
+  handshake, releases the sub-CPU, and streams the intro video off the disc.
+- The drive stopping is **correct behaviour**: `begin_read_cd` (d32xr `cd/crt.s`) issues BIOS
+  `ROMREADN` for `CHUNK_BLOCKS` = 8 sectors and the BIOS pauses the drive at the end of each chunk.
+- The final `CD_COMM_STOP` is Fusion's own error path, ~30 s after it gives up, not a cause.
+
+**The actual blocker: the master SH-2 crashes.** Coherent snapshot at the stall:
+
+```
+master  0000013C   <- the 32X BIOS BRA-to-self exception trap
+slave   000001C7   BIOS idle loop
+CP0     2E00       command 0x2E still posted = play_cd_roq_file (prireqtbl index 46)
+CFM/CFS 00/00      frozen, MD and sub-CPU both idle-polling
+drive   STOP       lba 8940
+```
+
+Everything else follows from that one crash. The MD is idling in `main_loop_handle_req` polling
+`$A15120` at ~40k/s with nothing to do (its bus histogram has **no `$A15128` at all**, so it is not
+in the RoQ loop), the sub-CPU's only gate-array traffic is `$FF800E`, and the master never clears
+COMM0, so `roq_request()` never sets `MARS_ROQFL_REQ`.
+
+Instrumentation built this session, all zero-rebuild:
+- `scratch/subhist.py` / `scratch/mdhist.py` — address-bus histograms for the sub-CPU and the MD,
+  enough to name the loop each is in. `DBG_S68K_A` is the full bus, so `$FF80xx` shows up.
+- `scratch/cfprobe.py` — the `$A1200E`/`$A1200F` comm flags plus their change counters.
+- `scratch/stall.py` — waits for `SECTOR_END` to start and then stop, and samples at that instant.
+- `scratch/shframe.py` — 32X work RAM is DDR3 `0x30000000`, stored as **byte-swapped 16-bit words**
+  (verified: `2f 16` = `mov.l r1,@-r15`, `4f 22` = `sts.l pr,@-r15`). Readable live from Linux.
+
+Ruled out along the way: the Mega CD PRG-RAM path does latch `PRG_DI` correctly
+(`ASIC.vhd` `PRS_READ`, on the same edge busy drops, inside the controller's 2-cycle guarantee), and
+the 32X work-RAM path is fed from a registered line cache in `s32x_ddr.sv`, not the shared `dout`.
+So neither has the r7/phase35 shape.
+
+**Next:** `tools/phase41_jump_trail.py` (build r27) latches the *transition* out of game code rather
+than the trap — `{jump_from, jump_to}` plus the two preceding PCs — because the old two-deep trail
+only ever caught the walk through the vector table (`0000013A -> 00000138 -> 0000013C`). It also
+swaps the spent PWM fields of `DBG_COMM` for CP4R = `$A15128` = `MARS_SYS_COMM8`, the register the
+RoQ stream runs on.
+
+Also worth knowing: `load_core` of an MGL from the menu races the MGL's own `delay=` fields and
+often leaves the 32X unstarted. Loading the core first and the game second is reliable. Several
+"mode A" boot failures earlier in the session were this, not a core bug.
+
+## ROOT CAUSE, third time: sdram.sv's single shared `dout` is corrupting SH-2 longword reads
+
+The r27 jump trail (`tools/phase41_jump_trail.py`) latches the PC either side of the master leaving
+real code. It caught the crash twice, and both are the same shape - `jsr` through a register loaded
+by a **PC-relative longword read from cart ROM**:
+
+```
+0201DC34  mov.l 0x201dce8,r14     ROM holds 0201F284   master got 00000001
+0201DC40  jsr   @r14
+0201DC42  mov   r9,r5             (delay slot; what the trail reports as jump_from)
+
+0201C57C  mov.l 0x201c5b0,r5      ROM holds 02017E38   master got 00000012
+0201C58C  jsr   @r5
+```
+
+The literal values were read straight out of `scratch/fusion.32x`, so "what it should be" is not a
+guess. Small values like 1 and 0x12 are what the Mega CD's BIOS ROM (port 1), PRG-RAM (port 2) or
+PCM (port 3) was reading at that instant: they land in `sdram.sv`'s one shared `dout` register
+between the SH-2's two 16-bit bus cycles. The SH-2 caches cart ROM, so one poisoned word stays for
+the whole 16-byte line.
+
+The master then jumps to a tiny address and **walks forward through the BIOS vector table** - whose
+entries are all `0000013C` and harmless as data - until it reaches the `BRA .` at 0x13C. That is
+the "wild jump into the vector table" seen since r18, finally explained. `tools/mif2bin.py` +
+`dis_sh2.py` on `shbios.mif` show the table directly: vec 0 = 0x140 (reset PC), vec 1 = 0x06040000
+(initial SP), and **53 of 80 entries point at the 0x13C trap**, so the trap identifies nothing by
+itself.
+
+Also nailed down: it needs the Mega CD active. Cart-only Doom 32X and cart-only Fusion both ran 45 s
+with the master in real code and PWM cycling normally.
+
+This is the SAME DEFECT for the third time - r7 on the MD cartridge path
+(`phase17_cart_latch.py`), r21 on the SH-2 cartridge path (`phase35_sh_rom_latch.py`), now on SH-2
+longword literals. Both earlier fixes were consumer-side latches racing to grab the shared register
+before someone else overwrote it. `tools/phase42_sdram_per_port_dout.py` fixes the cause instead:
+`ram_req` is already one-hot for the port being served, so each port gets its own output register.
+
+**r28 failed - record it so nobody rebuilds it.** The obvious form, five enabled registers each
+capturing `SDRAM_DQ` directly, compiles clean (+0.084) and **does not work**: the core comes up with
+both SH-2s at PC 0 and zero `$A151xx` accesses, only the MD 68000 ticking over. `SDRAM_DQ` capture is
+a tight input path - r25 had already failed timing on `sdram|reset[4] -> SDRAM_DQ[0]~en` - and
+fanning it to five loads across the fabric breaks it. A/B against r26 on the same MGL confirmed the
+regression rather than a bad load.
+
+r29 therefore leaves the capture path byte-identical - one register, one load on `SDRAM_DQ` - and
+splits per port **one cycle later** from the captured value. There is room: `busy` is
+`ram_req | ram_req_d | ram_req_d2`, high for three cycles after `STATE_READY`, and consumers sample
+when it falls, so the distribution lands two cycles early.
+
+Byte order for reading 32X work RAM from Linux, corrected: a 16-bit word at SH-2 address A is at
+DDR3 offset `(A - base) XOR 2`, and a 32-bit value reads back as a plain little-endian load. The
+first version of `scratch/shframe.py` used byte-swap-only and found nothing; with the right mapping
+the master's stack decodes into real return addresses (0x0201E5D0, 0x0201CAF8, 0x060005EC).
+
+## r29 SHIPPED - the per-port fix is right, but it is NOT the whole crash
+
+`releases/MegaCD_MD_MCD_32X_r29_perport_dout.rbf`, timing clean (+0.082), deployed as the main core.
+Validated: boots, runs, and **Night Trap streams at 75.0 sectors/s with a 13.33 ms period - exactly
+hardware** - so the SDRAM change causes no regression.
+
+What it fixes: the shared-`dout` race in `sdram.sv` is gone, properly, for all five ports. That is a
+real defect and it is closed.
+
+**What it does NOT fix: the master SH-2 still takes corrupted longword reads.** Caught again on r29:
+
+```
+run 2: JUMP: 0201DC68 -> 0201DC6A -> 0201DC6C  ==>  00002E01
+0201DC5C  mov.l 0x201dcfc,r2      ROM holds 0201F6EC
+0201DC6A  jsr   @r2
+```
+
+Expected `0201F6EC`, got `00002E01`. **Both halves are wrong**, so this is not the clean
+"another port's data" story the shared register told - and note `0x2E01` is suspiciously close to
+COMM0's live value at the time (`CP0=2E00`). Across all four captures the high word is always
+exactly `0x0000`:
+
+    00000001   00000012   000005EC   00002E01
+
+Still contention-linked: with the CD, the jump fires; **cart-only Fusion on r29, 4 runs, zero
+jumps**. So the remaining fault needs the Mega CD active but is not the `dout` sharing.
+
+Leads for next session, in order:
+1. `assign SHDO = SH_ROM_SEL ? SH_ROM_DO : SH_VDP_SEL ? VDP_DI : SH_REG_DO;` (IF.sv). A cart read
+   returning `SH_REG_DO` would explain a comm-register value appearing in a ROM literal.
+2. `if (SH_ROM_SEL && !SHBS_N && CE_F) SH_ROM_WAIT <= 1;` (IF.sv:833). The wait is asserted only on
+   CE_F, so there is a window where the SH-2 has started a cart access and `SHWAIT_N` still says
+   "no wait". If the SH-2 samples then, it gets the PREVIOUS read's `SH_ROM_DO`. Under contention
+   the previous access takes longer, which fits the CD-only correlation.
+3. Widen the trail to record the faulting *address* as well as the PC, so expected-vs-actual can be
+   read off directly instead of inferred from the literal pool.
+
+Separate, and NOT CD-related: roughly half of all boots stall at the 32X handshake with the master
+at 0x248-0x250 and `CP0=5351 CP1=4552` (the MD is waiting for `M_OK` = 0x4D5F4F4B, crt0.s:329).
+This happens cart-only too - 2 of 4 runs - so it is its own bug, not contention.
+
+## FUSION RUNS. Root cause: the SH-2 cartridge read never waited for the SDRAM to acknowledge
+
+`releases/MegaCD_MD_MCD_32X_r30_sh_handshake.rbf` (+0.129 slack), deployed as BOTH MegaCD_PP and
+MegaCD_PQ. Doom CD32X Fusion reaches its title screen and menu with a live animating demo behind it.
+
+`tools/phase43_sh_rom_handshake.py`. The cartridge arbiter serves both CPUs, but only one of them
+ever checked that the SDRAM took its request:
+
+```
+IF.sv:908  RS_MD_WAIT: if (ROM_WAIT_SYNC)                              <- waits for the ACK
+IF.sv:866  RS_SH_WAIT: if (/*(ROM_WAIT_SYNC || !USE_ROM_WAIT) &&*/ CE_F)   <- ACK COMMENTED OUT
+```
+
+The SH-2 path advanced on a fixed timer, two CE_F periods (~75-93 ns). Cartridge-only that works by
+luck: `sdram.sv` is in STATE_IDLE when the strobe arrives and accepts within ~1 clk_ram. With the
+Mega CD running, ports 1 (CD BIOS), 2 (PRG-RAM) and 3 (PCM) keep the controller busy, refresh is
+tested BEFORE port 0 in the same else-if chain (sdram.sv:161-167), and `prg_first` steps over port 0
+outright - acceptance slips to 8-14 clk_ram, PAST the timer. `RS_SH_READ` was then entered with
+ROM_WAIT still low, captured the PREVIOUS port-0 word, and `SH_ROM_CAP` locked it in.
+
+Before/after, eight consecutive boots each:
+
+| | r29 | r30 |
+|---|---|---|
+| wild jumps | fires | **0 of 8** |
+| boot-handshake stalls | ~50% | **0 of 8** |
+| RoQ intro | never finished | **EOF every run** |
+| screen | black | title screen + menu + animating demo |
+
+**phase35 was treating the symptom.** It made the capture earlier and added SH_ROM_CAP to hold it -
+which made the stale value STICK rather than self-heal. The real defect was a commented-out
+qualifier, and the correct form was ten lines below it in the same state machine.
+
+### STILL OUTSTANDING - race (a), NOT fixed by r30
+
+`sdram.sv` detects requests by RISING EDGE only (`~old_rd[0] && rd[0]`), but the cartridge strobe
+muxes are qualified by `&& S32X_CE0` (IF.sv:1103-1107), so whenever the arbiter is BETWEEN grants
+the MD 68000's raw /CE0 and /CAS0 pass straight through to the cartridge with the MD's address. If
+the controller accepts that unarbitrated read, `rd0` is already high when the SH-2 is granted, so
+the SH-2's own request never produces a rising edge and is never issued - only the address under it
+changes. The SH-2 then waits on the MD's busy and captures the MD's word, from the MD's address.
+
+r30 does NOT fix this: the handshake now waits for ROM_WAIT to rise, but ROM_WAIT does rise - from
+the MD's access. This is a real latent bug and is the top remaining technical item. If rom_sz > 4 MB
+(cart.sv:85,231 set ROM_LIN_EN) it would run almost continuously.
