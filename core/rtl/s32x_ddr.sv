@@ -90,7 +90,8 @@ module s32x_ddr
 	input      [63:0] tel_trap,     // master SH-2 PCs before the BIOS trap (phase30_trap_trail.py)
 	input      [63:0] tel_cd,       // Mega CD comm flags (tools/phase31_cd_handshake.py)
 	input      [63:0] tel_sub,      // sub-CPU halt state (tools/phase32_subcpu_halt.py)
-	input      [63:0] tel_a12       // MD writes to $A120xx (tools/phase33_a12_writes.py)
+	input      [63:0] tel_a12,      // MD writes to $A120xx (tools/phase33_a12_writes.py)
+	input      [63:0] tel_int       // 32X CMD interrupt delivery (tools/phase34_cmd_int.py)
 );
 
 assign DDRAM_CLK = clk;
@@ -236,7 +237,7 @@ reg         lp_pend = 0, lp_fb_q;
 reg  [15:0] tel_seq = 0;
 reg   [7:0] tel_sdr_rd = 0, tel_sdr_wr = 0, tel_fbd_wr = 0, tel_lp = 0;
 reg  [16:0] tel_timer = 0;
-reg   [3:0] tel_pend = 0;    // 12=counters ... 4=trap 3=cd 2=sub 1=a12
+reg   [4:0] tel_pend = 0;    // 13=counters ... 5=trap 4=cd 3=sub 2=a12 1=int
 reg   [7:0] lp_line_q;
 reg   [1:0] lp_tab_idx;
 reg         lp_go = 0;               // table entry captured: issue the line burst
@@ -308,7 +309,7 @@ always @(posedge clk) begin
 		if (|fbd_wr && !old_fbd_wr) tel_fbd_wr <= tel_fbd_wr + 1'd1;
 		if (lp_done) tel_lp <= tel_lp + 1'd1;
 		tel_timer <= tel_timer + 1'd1;
-		if (&tel_timer) tel_pend <= 4'd12;
+		if (&tel_timer) tel_pend <= 5'd13;
 	end
 
 	// ---- returning data (independent of DDRAM_BUSY)
@@ -372,43 +373,46 @@ always @(posedge clk) begin
 				ram_burst <= 8'd1;
 				ram_wr    <= 1;
 				state     <= S_WR;
-				if (tel_pend == 4'd12) begin
+				if (tel_pend == 5'd13) begin
 					tel_seq  <= tel_seq + 1'd1;
 					ram_addr <= BASE_TEL;
 					ram_din  <= {16'h5332, tel_seq, tel_sdr_rd, tel_sdr_wr, tel_fbd_wr, tel_lp};
-				end else if (tel_pend == 4'd11) begin
+				end else if (tel_pend == 5'd12) begin
 					ram_addr <= BASE_TEL + 25'd1;
 					ram_din  <= tel_audio;
-				end else if (tel_pend == 4'd10) begin
+				end else if (tel_pend == 5'd11) begin
 					ram_addr <= BASE_TEL + 25'd2;
 					ram_din  <= tel_mcdbus;
-				end else if (tel_pend == 4'd9) begin
+				end else if (tel_pend == 5'd10) begin
 					ram_addr <= BASE_TEL + 25'd3;
 					ram_din  <= tel_sector;
-				end else if (tel_pend == 4'd8) begin
+				end else if (tel_pend == 5'd9) begin
 					ram_addr <= BASE_TEL + 25'd4;
 					ram_din  <= tel_sh2pc;
-				end else if (tel_pend == 4'd7) begin
+				end else if (tel_pend == 5'd8) begin
 					ram_addr <= BASE_TEL + 25'd5;
 					ram_din  <= tel_md;
-				end else if (tel_pend == 4'd6) begin
+				end else if (tel_pend == 5'd7) begin
 					ram_addr <= BASE_TEL + 25'd6;
 					ram_din  <= tel_comm;
-				end else if (tel_pend == 4'd5) begin
+				end else if (tel_pend == 5'd6) begin
 					ram_addr <= BASE_TEL + 25'd7;
 					ram_din  <= tel_mdaddr;
-				end else if (tel_pend == 4'd4) begin
+				end else if (tel_pend == 5'd5) begin
 					ram_addr <= BASE_TEL + 25'd8;
 					ram_din  <= tel_trap;
-				end else if (tel_pend == 4'd3) begin
+				end else if (tel_pend == 5'd4) begin
 					ram_addr <= BASE_TEL + 25'd9;
 					ram_din  <= tel_cd;
-				end else if (tel_pend == 4'd2) begin
+				end else if (tel_pend == 5'd3) begin
 					ram_addr <= BASE_TEL + 25'd10;
 					ram_din  <= tel_sub;
-				end else begin
+				end else if (tel_pend == 5'd2) begin
 					ram_addr <= BASE_TEL + 25'd11;
 					ram_din  <= tel_a12;
+				end else begin
+					ram_addr <= BASE_TEL + 25'd12;
+					ram_din  <= tel_int;
 				end
 			end
 			else if (lp_pend) begin

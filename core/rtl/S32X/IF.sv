@@ -83,7 +83,8 @@ module S32X_IF
 	output            MD_CP_WRITE,
 	output            SH_CP_READ,
 	output            SH_CP_WRITE,
-	output     [63:0] DBG_COMM		// tools/phase27_comm_regs.py
+	output     [63:0] DBG_COMM,		// tools/phase27_comm_regs.py
+	output     [31:0] DBG_INT		// tools/phase34_cmd_int.py
 );
 	import S32X_PKG::*;
 
@@ -797,6 +798,7 @@ module S32X_IF
 	bit        MD_ROM_DTACK_N;
 	bit        MD_ROM_PASS;		// this MD cycle is a /CE0 pass-through (any ADEN), not the $880000 window
 	bit [15:0] SH_ROM_DO;
+	bit        SH_ROM_CAP;		// the ROM word has been captured for this access (phase35)
 	bit        S32X_CE0;
 	bit        S32X_LWR;
 	bit        S32X_UWR;
@@ -844,6 +846,7 @@ module S32X_IF
 				end
 
 				RS_SH_RW: begin
+					SH_ROM_CAP <= 0;
 					if (CE_F) begin
 						ROM_ST <= RS_SH_WAIT;
 					end
@@ -856,8 +859,18 @@ module S32X_IF
 				end
 
 				RS_SH_READ: begin
+					// sdram.sv shares ONE dout register across all five ports (sdram.sv:134-140), so the
+					// word is only ours until the next port completes a read. Capture it the instant it
+					// is valid rather than waiting for CE_F, which is asserted on just 3 of every 7
+					// clk_sys and left the value exposed for up to three clocks - long enough for the
+					// Mega CD's BIOS ROM, PRG-RAM or PCM port to overwrite it and feed the SH-2 a wrong
+					// instruction. Same root cause as the r7 Mega Drive cartridge fix.
+					if (!ROM_WAIT && !SH_ROM_CAP) begin
+						SH_ROM_DO <= CDI;
+						SH_ROM_CAP <= 1;
+					end
 					if (!ROM_WAIT/*_SYNC*/ && CE_F) begin
-						SH_ROM_DO <= CDI/*_SYNC*/;
+						SH_ROM_CAP <= 0;
 						SH_ROM_WAIT <= 0;
 						S32X_LWR <= 0;
 						S32X_UWR <= 0;
@@ -1070,6 +1083,8 @@ module S32X_IF
 	end
 
 	assign CDO = VDI_SYNC;
+	assign DBG_INT = {ICR, IMMR};
+
 	assign DBG_COMM = {CP0R, CP1R, CP2R,
 	                   LPWR.FULL, LPWR.EMPTY, RPWR.FULL, RPWR.EMPTY, PWMCR[11:0]};
 

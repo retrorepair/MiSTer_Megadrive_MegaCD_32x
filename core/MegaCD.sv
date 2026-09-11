@@ -955,6 +955,24 @@ always @(posedge clk_sys) begin
 end
 wire [63:0] tel_a12 = {tel_a12_off, tel_a12_data, tel_a12_wr, tel_a12_rd};
 
+// 32X CMD interrupt delivery (tools/phase34_cmd_int.py). The 68000 kicks the master with
+// $A15102; if that never lands, the master never runs the handler that sets COMM0 bit 0 and the
+// two deadlock exactly as observed.
+wire [31:0] S32X_INT;
+reg         intm_d;
+reg  [15:0] tel_intm_set, tel_intm_clr;
+always @(posedge clk_sys) begin
+	if (reset) begin
+		intm_d <= 0; tel_intm_set <= 0; tel_intm_clr <= 0;
+	end
+	else begin
+		intm_d <= S32X_INT[16];			// ICR bit 0 = INTM
+		if ( S32X_INT[16] & ~intm_d) tel_intm_set <= tel_intm_set + 16'd1;
+		if (~S32X_INT[16] &  intm_d) tel_intm_clr <= tel_intm_clr + 16'd1;
+	end
+end
+wire [63:0] tel_int = {S32X_INT, tel_intm_set, tel_intm_clr};
+
 wire [63:0] tel_sub = {MCD_DBG_A[23:1], 1'b0,
                        MCD_DBG_SRES, MCD_DBG_SBRQ, MCD_DBG_AS_N, MCD_DBG_DTACK_N, MCD_DBG_RNW, 3'b000,
                        tel_sub_cycles};
@@ -1003,6 +1021,7 @@ S32X #(.USE_ROM_WAIT(1)) S32X
 	.RST_N(~(reset | rom_download)),
 	.SH2_DIV2(status[2]),
 	.DBG_COMM(S32X_COMM),
+	.DBG_INT(S32X_INT),
 	.DBG_MSH_PC(S32X_MSH_PC),
 	.DBG_SSH_PC(S32X_SSH_PC),
 
@@ -1190,7 +1209,8 @@ s32x_ddr s32x_ddr
 	.tel_trap(tel_trap),
 	.tel_cd(tel_cd),
 	.tel_sub(tel_sub),
-	.tel_a12(tel_a12)
+	.tel_a12(tel_a12),
+	.tel_int(tel_int)
 );
 
 always @(posedge clk_sys) begin

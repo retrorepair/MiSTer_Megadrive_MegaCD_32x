@@ -78,7 +78,8 @@ module S32X
 	output     [23:0] DBG_CA,
 	output     [31:0] DBG_MSH_PC,		// tools/phase24_sh2_pc.py
 	output     [31:0] DBG_SSH_PC,
-	output     [63:0] DBG_COMM			// tools/phase27_comm_regs.py
+	output     [63:0] DBG_COMM,			// tools/phase27_comm_regs.py
+	output     [31:0] DBG_INT			// tools/phase34_cmd_int.py
 );
 	import S32X_PKG::*;
 
@@ -351,7 +352,8 @@ module S32X
 
 		.ROM_WAIT(ROM_WAIT),
 		.CART_EXT(CART_EXT),
-		.DBG_COMM(DBG_COMM)
+		.DBG_COMM(DBG_COMM),
+		.DBG_INT(DBG_INT)
 	);
 
 	assign CA = IF_SEL ? {2'b00,SHA[21:1]} : {VA[23:22],IF_OVA,VA[18:1]};

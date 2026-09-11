@@ -1602,3 +1602,44 @@ loaded, rather than guessing from which registers are busy.
 - d32xr names comm registers by BYTE OFFSET: its COMM0/COMM2/COMM4 are `$A15120`/`$A15122`/`$A15124`
   = our `CP0R`/`CP1R`/`CP2R`. `CP4R` is `$A15128`. This cost an hour.
 - Fusion's Mode 1 init and its `prireqtbl` command table are in `src-md/scd.c` and `src-md/crt0.s`.
+
+## The SH-2 cartridge read had the r7 bug too - and the tower is what exposes it
+
+`sdram.sv` shares ONE data register across all five ports:
+```
+sdram.sv:134  reg [15:0] dout;
+sdram.sv:136  assign dout0 = dout;  dout1  dout2  dout3  dout4
+sdram.sv:227  dout <= SDRAM_DQ;     reloaded on ANY port's read completion
+```
+Every consumer must latch it on its own handshake. r7 fixed that for the Mega Drive cartridge path.
+**The SH-2 cartridge path had the same defect, with a wider window:**
+```
+IF.sv:860   if (!ROM_WAIT && CE_F) begin
+IF.sv:861       SH_ROM_DO <= CDI;        <- live wire into the shared register
+```
+The MD path captures as soon as its wait drops; this one also waits for `CE_F`, the SH-2 clock
+enable, asserted on only 3 of every 7 clk_sys. A word that is already valid therefore sits exposed
+for up to three clocks while the Mega CD's BIOS ROM (port 1), PRG-RAM (port 2) and PCM (port 3) can
+each complete a read and overwrite `dout`. The SH-2 executes whatever landed there.
+
+Evidence it is real:
+- the master takes **wild jumps** - the frozen trap trail shows `060005C0 -> 060005C2 -> 0000013C`,
+  i.e. it ends up executing the 32X boot ROM's vector table as code and walking into `BRA .`
+- it is **intermittent**, as a race must be
+- it **tracks contention**: trapped 2 of 3 runs with the disc in, 0 of 3 cart-only
+
+`32X/IF.sv` is byte-identical here, so srg320's standalone 32X carries the same race and never feels
+it - that core has no Mega CD ports competing for the register. This is a latent upstream bug that
+only the tower exposes, and worth reporting upstream.
+
+**Fix (r21, `tools/phase35_sh_rom_latch.py`)**: capture `CDI` the first cycle the word is valid and
+hold it in `SH_ROM_DO` until the SH-2 clock edge consumes it, via a one-shot `SH_ROM_CAP` flag
+cleared in `RS_SH_RW`. The state machine still advances on `CE_F`, so SH-2 bus timing is unchanged.
+
+### Instruments built tonight (all in the tree, all reusable)
+`tools/dis_sh2.py` (capstone SH-2), `tools/dis68k.py`, `tools/conf_bits.py` (OSD bit map - every one
+of the 64 status bits is claimed), `tools/mister/pcsample.py`, `tools/mister/sh2watch.sh`,
+`tools/mister/soakfreeze.sh`, `tools/mister/freezetest.sh`, `tools/mister/teldump.py`, plus telemetry
+beats 0-12: 32X DDR3 counters, audio peaks, sub-CPU PRG-RAM latency, drive sector rates, both SH-2
+PCs, MD 68000 address + `$A151xx`/`$A120xx` traffic, 32X comm registers + PWM, Mega CD comm flags,
+sub-CPU halt state, and the master's pre-trap PC trail.
