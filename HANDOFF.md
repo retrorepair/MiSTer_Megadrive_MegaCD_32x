@@ -1983,3 +1983,51 @@ justify displacing the build that has the soak time. PP = r30, PQ = r31. The use
 
 Both are pushed on branch `phase18-dtack`; r31's commit is titled UNTESTED and that is now stale -
 it has been tested, just not soaked.
+
+## CORRECTION: r30 fixed the wild jump, NOT Fusion's boot reliability
+
+Measured with a SCREEN-based test (`scratch/menutest.py`), 55 s after load, three frames:
+
+| build | reached the menu |
+|---|---|
+| r30 | **2 of 5** |
+| r31 | **1 of 5** |
+
+So Fusion reaches its menu roughly one boot in three. The earlier "8 of 8 clean" result was the
+JUMP TRAIL, which only proves the master did not wild-jump. It says nothing about whether the game
+got anywhere, and a black screen 60 s in is a failure however healthy the PCs look. Do not use the
+jump trail as a proxy for "it works" again - screenshot the screen.
+
+What r30 DID fix is real and stands: the wild jump is gone, Chaotix (a known crash) now runs, and
+13 titles sweep clean.
+
+### The remaining failure: an infinite memset
+
+On a black-screen boot the master spins at 0201FD4C in the byte tail of a memset:
+
+```
+0201FD4C  mov.b  r5,@r0
+0201FD4E  add    #1,r0
+0201FD50  cmp/eq r6,r0        <- end pointer, never equal
+0201FD52  bf     0x201fd4c
+0201FD54  rts
+```
+
+so it was handed a bad length or destination and clears memory for ever. State at the hang:
+`CP0=0000 CP1=0001 COMM8=0000`, drive `STOP`, `SECTOR_END 0/s`, comm flags frozen at 00/00, and the
+intro video HAS already played (the id logo renders, ~30 s in).
+
+This is corrupted DATA, not a corrupted code pointer - which is why r30's fix does not catch it, and
+r31 (the strobe leak, which yields plausible-looking wrong data) does not either.
+
+Next steps, in order:
+1. Find where the memset length/destination comes from. Disassemble back from 0201FD38 to the memset
+   entry, then find its caller. Suspect a value obtained from the CD file system
+   (`scd_gfile_length` / `scd_tell_gfile` / `Mars_SeekCDFile`, which returns `*(int*)&MARS_SYS_COMM8`
+   - a 32-bit read of the comm registers).
+2. Compare telemetry between a MENU boot and a BLACK boot at the same instant; the divergence point
+   is what matters, not the end state.
+3. Only then change RTL.
+
+r31 is NOT promoted and on this evidence has no case: 1 of 5 against r30's 2 of 5 (small samples,
+no significant difference). It still closes a genuine latent race, so keep the commit.
