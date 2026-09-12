@@ -184,6 +184,43 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41: measured exhaustively. There is NO wait-state defect left to fix.
+
+`tools/phase61_all_sub_latency.py` stops targeting and arms on EVERY sub-CPU /AS, with a second
+counter for the $FF8000-$FF81FF gate-array window where the RPC mailbox lives. During the test:
+
+```
+ALL sub-CPU accesses : 8,661,316 per 3 s (2.887 M/s)   no slow cycles in steady state
+$FF80xx              : 1,443,553 per 3 s   min 0  max 5  slow 0
+ratio 8,661,316 / 1,443,553 = 6.0000 exactly
+```
+
+(the 422,780 over-deadline and max 255 are cumulative from boot and frozen throughout the test.)
+
+Two things follow. **One:** the sub-CPU has no slow bus cycle anywhere - not PRG-RAM, not the CDC
+ports, not the gate array - and it is issuing 2.887 M bus cycles/s against a 3.125 M ceiling at
+12.5 MHz, 92%. **Two:** the exact 6:1 ratio shows the sub-CPU sitting in a six-bus-cycle loop
+polling one gate-array register, period 2.08 µs = 26 sub-CPU clocks, which is what a 68000 running
+that loop should take. Detection latency is therefore ~1 µs, nowhere near the ~55 µs an RPC costs.
+
+**So the remaining 1.8-2.5% is not memory latency and not mailbox detection.** It is instruction
+cycles - on one CPU or the other, or in how many times the protocol goes round - and the honest
+position is that nothing measured says which, or that any of it is wrong. Four hypotheses have now
+been killed by measurement:
+
+| hypothesis | verdict |
+|---|---|
+| sub-CPU PRG-RAM latency | 0.00% over deadline at 2.41 M reads/s |
+| gate-array register acknowledge | 1 clk_sys, both sides |
+| CDC register ports | max 5 clk_sys, 0 over deadline |
+| any other sub-CPU access | no slow cycles in steady state |
+
+**Do not close this by adjusting a constant.** If it is to be closed, the next instrument is a
+cycle-level trace of one RPC - timestamp the main CPU's command write, the sub-CPU's first read of
+it, its reply, and the main CPU's observation of that reply - and compare the four intervals against
+a 68000 cycle count of the same code. That is a different class of probe from a latency histogram
+and it is the only thing that can say where the 2 µs goes.
+
 ### CDC FLAGS 41: ALL THREE latency candidates measured and eliminated
 
 `tools/phase60_cdcport_latency.py` times the sub-CPU's /AS-to-/DTACK for the CDC register ports
