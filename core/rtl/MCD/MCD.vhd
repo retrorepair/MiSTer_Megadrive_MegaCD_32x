@@ -35,6 +35,7 @@ entity MCD is
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
 		DBG_EARLY_DTACK: in std_logic := '0';
+		PRG_POST_WR		: in std_logic := '1';
 		DBG_SRES			: out std_logic;						-- tools/phase32_subcpu_halt.py
 		DBG_SBRQ			: out std_logic;
 		DBG_CFM			: out std_logic_vector(7 downto 0);	-- tools/phase31_cd_handshake.py
@@ -275,6 +276,7 @@ begin
 		PRG_RFS  		=> PRG_RFS,
 		PRG_RDY  		=> PRG_RDY,
 		DBG_EARLY_DTACK => DBG_EARLY_DTACK,
+		PRG_POST_WR => PRG_POST_WR,
 		DBG_SRES        => DBG_SRES,
 		DBG_SBRQ        => DBG_SBRQ,
 		DBG_CFM         => DBG_CFM,

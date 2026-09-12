@@ -235,6 +235,7 @@ localparam CONF_STR = {
 	"H2O[39],MCD /AS,68000,Bus;",
 	"H2O[36],MCD PRG cache,On,Off;",
 	"H2O[38],PRG cache hits,On,Off;",
+	"H2O[57],MCD PRG posted writes,On,Off;",
 	"H2O[28],MCD PRG DTACK,Data,Early;",
 	"H2O[24],MCD PRG Priority,Normal,Above Cart;",
 	"H2-;",
@@ -631,6 +632,7 @@ MCD MCD
 	.PRG_OE_N(MCD_PRG_OE_N),
 	.PRG_RDY(~MCD_PRG_BUSY),
 	.DBG_EARLY_DTACK(status[28]),   // ungated: the A/B is driven by writing MegaCD.CFG, which cannot reach dbg_menu
+	.PRG_POST_WR(~status[57]),      // posted sub-CPU PRG-RAM writes, DEFAULT ON; set bit 57 for upstream timing
 
 	.DBG_SRES(MCD_DBG_SRES),
 	.DBG_SBRQ(MCD_DBG_SBRQ),

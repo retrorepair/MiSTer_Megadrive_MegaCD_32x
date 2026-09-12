@@ -53,6 +53,7 @@ entity ASIC is
 		PRG_RFS			: out std_logic;
 		PRG_RDY			: in std_logic;
 		DBG_EARLY_DTACK: in std_logic;
+		PRG_POST_WR		: in std_logic;		-- post sub-CPU PRG-RAM writes (tools/phase57_post_prg_writes.py)
 		DBG_SRES			: out std_logic;						-- tools/phase32_subcpu_halt.py
 		DBG_SBRQ			: out std_logic;
 		DBG_CFM			: out std_logic_vector(7 downto 0);	-- tools/phase31_cd_handshake.py
@@ -158,6 +159,7 @@ architecture rtl of ASIC is
 	signal PRG_RAM_WRL 				: std_logic;
 	signal PRG_RAM_WRH 				: std_logic;
 	signal PRG_RAM_RD 				: std_logic;
+	signal PRG_WR_POSTED 			: std_logic;	-- this write was already acknowledged in PRS_IDLE
 	signal PRG_RAM_RFS 				: std_logic;
 	signal PRG_RAM_RFS_TIMER 		: unsigned(9 downto 0);
 	signal PRG_RAM_RFS_SCHED 		: std_logic;
@@ -1440,6 +1442,7 @@ begin
 			PRG_RAM_WRL <= '0';
 			PRG_RAM_WRH <= '0';
 			PRG_RAM_RD <= '0';
+			PRG_WR_POSTED <= '0';
 			M68K_PRGRAM_DTACK_N <= '1';
 			S68K_PRGRAM_DTACK_N <= '1';
 			PR_DMA_RUN <= '0';
@@ -1577,12 +1580,17 @@ begin
 								PRG_RAM_WRL <= not S68K_LDS_N and not S68K_RNW;
 								PRG_RAM_WRH <= not S68K_UDS_N and not S68K_RNW;
 								PRG_RAM_RD <= S68K_RNW;
-								-- Writes are posted when DBG_EARLY_DTACK is set: address and data are latched
-								-- here, so the CPU can be acknowledged at once (real PRG-RAM takes writes
-								-- without wait states); the next PRG-RAM access still waits for this one to
-								-- reach the SDRAM controller. Default is upstream: acknowledge in PRS_WRITE.
-								if DBG_EARLY_DTACK = '1' and S68K_RNW = '0' then
+								-- Writes are POSTED (PRG_POST_WR, default on): address and data are latched
+								-- here, so the CPU is acknowledged at once exactly as real PRG-RAM does - it
+								-- takes writes without wait states. Nothing can be lost by acknowledging
+								-- early: PRSS still runs PRS_WAIT -> PRS_WRITE -> PRS_END holding the address
+								-- and data, and PRS_IDLE cannot issue the next access until PRG_RDY.
+								-- This is NOT the old DBG_EARLY_DTACK, which also acknowledged READS as soon
+								-- as the controller accepted them and handed the sub-CPU stale data on
+								-- 0.011-0.068% of reads. That half stays behind bit 28 and stays off.
+								if PRG_POST_WR = '1' and S68K_RNW = '0' then
 									S68K_PRGRAM_DTACK_N <= '0';
+									PRG_WR_POSTED <= '1';
 								end if;
 								PRSS <= PRS_WAIT;
 							else
@@ -1628,7 +1636,14 @@ begin
 					when PRS_WRITE =>
 						PRG_RAM_WRL <= '0';
 						PRG_RAM_WRH <= '0';
-						S68K_PRGRAM_DTACK_N <= '0';   -- write issued: acknowledge (upstream timing)
+						-- Only acknowledge here if the write was NOT posted. A posted write has usually
+						-- ended the CPU's bus cycle already, and the strobe-follow logic above has taken
+						-- /DTACK back to '1'; asserting it again now would land in the CPU's NEXT bus cycle
+						-- and terminate it early - the build 21 BIOS corruption this file warns about.
+						if PRG_WR_POSTED = '0' then
+							S68K_PRGRAM_DTACK_N <= '0';   -- write issued: acknowledge (upstream timing)
+						end if;
+						PRG_WR_POSTED <= '0';
 						PRSS <= PRS_END;
 
 					when PRS_DMA_WAIT =>
