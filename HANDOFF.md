@@ -118,10 +118,45 @@ and no other SDRAM port addresses the region (port 0 cartridge 0000000-0EFFFFF, 
 0F00000-0F1FFFF, port 3 PCM 1080000-108FFFF, port 4 load/save). So a cache at the port sees every
 write and invalidation is automatic.
 
-**One trap worth keeping:** ASIC.vhd's PRS_WAIT drops `PRG_RAM_WRL/WRH` as soon as it sees busy go
-HIGH (PRS_WRITE) — it does *not* wait for busy to fall. A cache that merges a write from the live
-pins at completion therefore stores the OLD word back and marks it valid. `prg_cache.sv` latches the
-write data and byte enables with the request. This was caught by reading ASIC.vhd, not by testing.
+### The model is CONFIRMED. First build, on hardware:
+
+| | r38 baseline | + PRG-RAM cache (build 1) |
+|---|---|---|
+| VAR TESTS | 26077 ERR 02 | **27945** ERR 02 |
+| IRQ TEST | 69 ERR 06 | 4 ERR 06 |
+| REG 8030 | 1284 ERR 07 | — hung before it |
+| CDC FLAGS | 47 ERR 40 | — hung before it |
+
+**VAR TESTS +7.2%.** The main CPU's loop really was being held back by SDRAM contention with the
+sub-CPU, and removing most of that traffic really does speed it up — comfortably more than the 2.59%
+CDC FLAGS needs. Everything else about the 4-failure diagnosis stands.
+
+(Take the baseline from this table, not from the older text: measured the same day, same disc, same
+procedure. The historical "IRQ TEST 227 ERROR 09" is from an earlier setup and is not comparable.)
+
+Build 1 then **hung at REG X000**, and the three defects behind it are all the same family this
+project keeps meeting — an acknowledge given before the data or the request is safe:
+
+1. **`busy` rose when a request was noticed, not when the SDRAM accepted it.** PRS_WAIT reads "busy
+   went high" as "accepted", and PRS_WRITE drops `PRG_RAM_WRL/WRH` immediately; sdram.sv captures a
+   request only on its strobe's RISING edge and drops the pending flag when the strobe goes away
+   (`old_wr <= old_wr & wr`). A strobe withdrawn before the controller was free **loses the write**.
+   That is the hang.
+2. **Read data loaded in the same cycle busy fell.** PRS_READ latches `PRG_DI` on the clock it sees
+   `PRG_RDY` go high, and clk_sys edges coincide with every other clk_ram edge, so the gate array
+   latches the PREVIOUS word. sdram.sv holds busy two extra cycles after capturing data for exactly
+   this reason.
+3. **The tag comparison used the live address.** ASIC.vhd has TWO machines writing `PRG_RAM_ADDR`
+   (PRMS for the MD window, PRSS for sub-CPU and DMA) and nothing holds it still across an access.
+
+**One trap worth keeping even though it was caught by reading rather than by testing:** PRS_WAIT
+drops `PRG_RAM_WRL/WRH` as soon as busy goes HIGH, so a cache that merges a write from the live pins
+at completion stores the OLD word back and marks it valid. `prg_cache.sv` latches write data and
+byte enables with the request.
+
+**Also note: build 1 cost `pll_hdmi` timing** (+0.383 → −0.041, TNS −0.082) while the core clocks
+stayed positive (clk_ram +0.456, clk_sys +0.708). Whatever build finally passes has to close that
+before it can be a release.
 
 Original notes: working set is ~50 words, so temporal locality alone suffices; `sdram.sv`
 has no burst support so a line fill would cost the same slots. The invalidation concern was

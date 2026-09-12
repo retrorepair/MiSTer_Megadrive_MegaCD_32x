@@ -54,6 +54,14 @@ module prg_cache #(parameter IDX = 9)   // 2**IDX entries, direct mapped, one 16
 	input             clk,          // clk_ram, the SDRAM controller's clock
 	input             reset,
 
+	// Both settable from the OSD, so this can be bisected on hardware instead of by rebuilding:
+	//   en=0            pure pass-through - must behave EXACTLY as the core did before this module
+	//   en=1, nohit=1   the wrapper's protocol runs and entries fill, but every read still goes to
+	//                   the SDRAM, so a failure here is the handshake, not the cached data
+	//   en=1, nohit=0   the cache proper
+	input             en,
+	input             nohit,
+
 	// Mega CD side: ASIC.vhd's PRG_* port, same protocol sdram.sv presents
 	input      [24:1] a,
 	input      [15:0] din,
@@ -67,7 +75,7 @@ module prg_cache #(parameter IDX = 9)   // 2**IDX entries, direct mapped, one 16
 	output     [24:1] s_a,
 	output     [15:0] s_din,
 	input      [15:0] s_dout,
-	output reg        s_rd,
+	output            s_rd,
 	output            s_wrl,
 	output            s_wrh,
 	input             s_busy
@@ -84,6 +92,9 @@ assign s_din = din;
 assign s_wrl = wrl;
 assign s_wrh = wrh;
 
+reg s_rd_r;
+assign s_rd = en ? s_rd_r : rd;   // bypass: the read strobe goes straight through
+
 wire            wr  = wrl | wrh;
 wire [IDX-1:0]  idx = a[IDX:1];
 wire [TAGW-1:0] tag = a[24:IDX+1];
@@ -93,13 +104,17 @@ localparam S_INIT = 3'd0,   // clear every valid bit: MLABs come up undefined
            S_LOOK = 3'd2,   // q is valid this cycle
            S_HIT  = 3'd3,
            S_MISS = 3'd4,
-           S_WR   = 3'd5;
+           S_WR   = 3'd5,
+           S_TAIL = 3'd6;   // write finished: hold busy until we are really idle
 
 reg  [2:0] state = S_INIT;
 reg  [IDX:0] icnt = 0;
 reg  [3:0] hcnt;
 reg        saw_busy;
 reg        old_rd, old_wr;
+// A request seen while this module is still occupied is REMEMBERED, not dropped. Belt and braces
+// against the failure above: nothing else in the chain will ever re-raise a strobe that was ignored.
+reg        pend_rd, pend_wr;
 reg [TAGW-1:0] q_tag;
 reg [IDX-1:0]  q_idx;
 reg [15:0] dout_r;
@@ -135,7 +150,7 @@ wire hit = q[W-1] && q[W-2 -: TAGW] == q_tag;
 reg [15:0] q_din;
 reg        q_wrl, q_wrh;
 
-assign dout = dout_r;
+assign dout = en ? dout_r : s_dout;
 
 // busy must NOT rise merely because a request has been noticed. ASIC.vhd's PRS_WAIT takes
 // "busy has gone high" to mean "the SDRAM controller has accepted this request", and PRS_WRITE then
@@ -144,22 +159,61 @@ assign dout = dout_r;
 // strobe withdrawn before the controller is free LOSES THE WRITE outright. Acknowledging early cost
 // a whole build: the verificator ran further than before and then hung at REG X000.
 //
-// So: high while initialising, high while the SDRAM is actually serving us, and high for the hit
-// path and the tail that keeps read data stable - never in between.
-assign busy = (state == S_INIT) | (state == S_HIT) | s_busy;
+// It must also not FALL until this module is idle again. On a write the SDRAM's own busy drops while
+// S_WR is still finishing, and ASIC.vhd reads that as "access over": it goes PRS_END -> PRS_IDLE and
+// raises the strobes for the NEXT access while the cache is still occupied. The request edge is then
+// gone by the time S_IDLE looks for it - either lost outright (the sub-CPU waits for a /DTACK that
+// never comes: exactly the hardware hang, subA stuck with AS_N=0 and DTACK_N=1) or, if busy happens
+// to still be high from a tail, answered with the PREVIOUS access's data. Both were reproduced in
+// scratch/sim/tb_prg_cache.sv.
+//
+// So: high while initialising, high while the SDRAM is serving us, and high through the tail that
+// both keeps read data stable and covers the rest of this module's work - never in between.
+// and it must never DIP, not even for one clock. When the SDRAM finished a miss, busy was
+// (state==S_HIT)|s_busy: s_busy had just fallen and S_HIT had not yet been entered, so busy went low
+// for exactly one clk_ram cycle. clk_sys edges land on every other clk_ram edge, so about half the
+// time ASIC.vhd's PRS_READ sampled that dip, decided the access was over, and latched PRG_DI in the
+// same clock dout_r was still loading - every read came back with the PREVIOUS access's word. The
+// simulation caught it as a clean off-by-one across every read.
+//
+// Reads may be marked busy from the very start: the ASIC only waits. WRITES may not, because
+// PRS_WRITE drops the write strobes as soon as it sees busy, and sdram.sv still needs them - so the
+// write path stays quiet until s_busy says the controller has taken it, then saw_busy carries it
+// through to the tail without a gap.
+wire busy_int = (state == S_INIT)
+              | (state == S_LOOK) | (state == S_MISS) | (state == S_HIT)
+              | (state == S_WR && saw_busy)
+              | (state == S_TAIL)
+              | s_busy;
+assign busy = en ? busy_int : s_busy;
 
 always @(posedge clk) begin
 	old_rd <= rd;
 	old_wr <= wr;
 	we     <= 0;
 
+	if (en && rd && !old_rd) pend_rd <= 1;
+	if (en && wr && !old_wr) pend_wr <= 1;
+
 	if (reset) begin
 		state    <= S_INIT;
 		icnt     <= 0;
-		s_rd     <= 0;
+		s_rd_r   <= 0;
 		saw_busy <= 0;
 		old_rd   <= 0;
 		old_wr   <= 0;
+		pend_rd  <= 0;
+		pend_wr  <= 0;
+	end
+	else if (!en) begin
+		// Parked while bypassed, and re-clears itself on the way back in: PRG-RAM will have moved
+		// underneath us while the cache was not watching the port.
+		state    <= S_INIT;
+		icnt     <= 0;
+		s_rd_r   <= 0;
+		saw_busy <= 0;
+		pend_rd  <= 0;
+		pend_wr  <= 0;
 	end
 	else case (state)
 		S_INIT: begin
@@ -174,11 +228,13 @@ always @(posedge clk) begin
 			saw_busy <= 0;
 			// Edge-triggered exactly as sdram.sv is, so a strobe left high after one access
 			// cannot be mistaken for the next.
-			if (rd && !old_rd) begin
+			if (pend_rd || (en && rd && !old_rd)) begin
+				pend_rd <= 0;
 				q_idx <= idx; q_tag <= tag;
 				state <= S_LOOK;
 			end
-			else if (wr && !old_wr) begin
+			else if (pend_wr || (en && wr && !old_wr)) begin
+				pend_wr <= 0;
 				q_idx <= idx; q_tag <= tag;
 				q_din <= din; q_wrl <= wrl; q_wrh <= wrh;
 				state <= S_WR;
@@ -186,14 +242,14 @@ always @(posedge clk) begin
 		end
 
 		S_LOOK: begin
-			if (hit) begin
+			if (hit && !nohit) begin
 				dout_r <= q[15:0];
 				hcnt   <= 4'd8;          // S_LOOK + 9 = 10 clk_ram cycles, >= an uncontended miss
 				state  <= S_HIT;
 			end
 			else begin
-				s_rd  <= 1;
-				state <= S_MISS;
+				s_rd_r <= 1;
+				state  <= S_MISS;
 			end
 		end
 
@@ -209,7 +265,7 @@ always @(posedge clk) begin
 				wa <= q_idx;
 				wd <= {1'b1, q_tag, s_dout};
 				we <= 1;
-				s_rd  <= 0;
+				s_rd_r <= 0;
 				// Do NOT drop busy in the same cycle dout_r loads. ASIC.vhd's PRS_READ latches
 				// PRG_DI on the clock where it sees PRG_RDY go high, and clk_sys edges coincide
 				// with every other clk_ram edge, so it would latch the PREVIOUS word. sdram.sv
@@ -235,8 +291,14 @@ always @(posedge clk) begin
 					we <= 1;
 				end
 				// a byte write that misses allocates nothing: half a word is not a cache line
-				state <= S_IDLE;
+				hcnt  <= 4'd2;
+				state <= S_TAIL;
 			end
+		end
+
+		S_TAIL: begin
+			hcnt <= hcnt - 1'd1;
+			if (!hcnt) state <= S_IDLE;
 		end
 
 		default: state <= S_IDLE;
