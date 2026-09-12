@@ -184,6 +184,30 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41: the decoder waveform is NOT the cause. Both numbers are now known.
+
+Forcing the d4 branch to report (`tools/dis68k.py` located it; patch BHI.W -> BRA.W at 0x0145A4,
+`scratch/mcd-verif-showd4.bin`) gives the pair the screen never shows together:
+
+    d4 = 48   (pass 48..50)      d5 = 70   (pass 71..73)      total = 118
+    duty = 48/118 = 40.68%       allowed duty 39.0% .. 41.3%  -> THE DUTY IS CORRECT
+    for d5 >= 71 at this duty the total must be ~120           -> SHORT BY 1.7%
+
+So this is not the DECI waveform and not the 40% clear point. d4 and d5 count main<->sub RPC round
+trips, so the total is (75 Hz frame) / (poll period) and **the RPC round trip is ~1.7% too slow** -
+about 113 µs per iteration, 56 µs per RPC. Everything done today moved it by one count (69 -> 70),
+which says the dominant term is not sub-CPU memory latency. Next: disassemble the two RPC stubs
+(pointers in d3 and d6, set just before 0x14540) and find what actually bounds the round trip. Note
+VAR TESTS - main-CPU polls of a gate-array register - now passes, so plain $A120xx read timing is
+about right; the cost is somewhere in the handshake.
+
+**A real defect was found and fixed on the way, and it is NOT this one.** Sampling DEC_FRAME and
+DEC_MID live showed DEC_MID firing MORE often than DEC_FRAME (+25 vs +22, +29 vs +27): `SECTOR_END`
+reset `FRAME_CNT` without pulsing `DEC_FRAME`, so a sector arriving after the 40% mark cancelled that
+frame's DECI assertion and restarted the count. The timer now free-runs, which is what jgenesis
+states and what CDC.vhd's own comment already said real silicon does. It did not move CDC FLAGS -
+a clean negative result that rules the waveform out - but it is correct on its own merits.
+
 ### ROOT CAUSE of the last two failures: PRG-RAM WRITES are not posted
 
 Both survivors have one cause, and it is the half of the latency problem today's cache did not

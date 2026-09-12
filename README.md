@@ -11,7 +11,7 @@ the Mega CD streaming video into Word RAM while the 32X's two SH-2s blit it to a
 project takes the Mega CD block from one, the 32X and SH-2 blocks from the other, puts them on a single
 Mega Drive, and makes the whole thing fit in one Cyclone V.
 
-**Current release:** `releases/MegaCD_MD_MCD_32X_r41_postwrites.rbf`. Timing closes with margin, every
+**Current release:** `releases/MegaCD_MD_MCD_32X_r42_freedec.rbf`. Timing closes with margin, every
 tier runs on real hardware, a thirteen-title sweep is clean, and
 mcd-verificator now passes 17 of 18. It is not finished — see
 [Status](#status) and [Known gaps](#known-gaps) for an honest account of what has and has not been
@@ -58,14 +58,14 @@ liveness counter advancing at every one of 24 samples and all 24 frames distinct
 3 Ninjas in gameplay with 18 of 20 frames distinct. Night Trap streams at 75.0 sectors/s with a
 13.33 ms period, against 13.333 ms on hardware.
 
-**Fit and timing** (release r41, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
+**Fit and timing** (release r42, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
 
 | | |
 |---|---|
-| Logic | 33,381 / 41,910 ALMs (80%) |
+| Logic | 33,453 / 41,910 ALMs (80%) |
 | Block RAM | 539 / 553 M10K (97%) |
 | DSP | 61 / 112 (54%) |
-| worst setup slack | +0.132 ns (`pll_hdmi`) |
+| worst setup slack | +0.012 ns (`pll_hdmi`, the framework's video scaler) |
 
 Every clock domain has positive setup and hold slack.
 
@@ -286,7 +286,10 @@ Read this before trusting the core with anything important.
   The pass criteria are disassembled out of the test ROM rather than guessed (`tools/dis68k.py`):
   VAR TESTS wants 23753-23980 (`@0x0189F0`), the IRQ test's last sub-test wants 224-226
   (`@0x018402`, matching jgenesis independently), CDC FLAGS wants `48 <= d4 <= 50` and
-  `71 <= d5 <= 73` (`@0x01459A`). We read d5 = 70 — **one count short**, about 1%. See `HANDOFF.md`.
+  `71 <= d5 <= 73` (`@0x01459A`). Both halves are now known — **d4 = 48, d5 = 70, total 118** — so
+  the duty (40.68%) is inside the allowed band and it is the *total* that is ~1.7% short. d4 and d5
+  count main↔sub RPC round trips, so what remains is the round trip being slightly slow, not the
+  decoder waveform. See `HANDOFF.md`.
   [jgenesis issue 105](https://github.com/jsgroth/jgenesis/issues/105) is the best external
   reference; its author drove the same suite to 18 of 18.
 - **Doom CD32X Fusion boots to its SELECT GAME menu**, and a ten-minute soak was clean, but **one boot in four
