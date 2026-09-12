@@ -184,6 +184,31 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41: ALL THREE latency candidates measured and eliminated
+
+`tools/phase60_cdcport_latency.py` times the sub-CPU's /AS-to-/DTACK for the CDC register ports
+($FF8004/5 index, $FF8006/7 data = 0x7FC002/3 on the [23:1] bus), the way phase18 did for PRG-RAM.
+Measured on hardware during a verificator run:
+
+```
+CDC-port accesses   min 0   max 5 clk_sys   over-deadline (>6) : 0
+```
+
+So with the three measurements together, **the sub-CPU takes no wait states anywhere in the RPC
+path**: PRG-RAM reads 0.00% over deadline at 2.41 M/s, gate-array registers acknowledged in one
+clk_sys on both sides, CDC ports peaking at 5 clk_sys against a 6 deadline.
+
+**The remaining deficit is therefore NOT wait states.** Our poll period is ~113 µs where the test
+implies ~111 µs — 1.8%, about 2 µs per count, which is roughly 15 main-CPU or 25 sub-CPU
+instructions. VAR TESTS passing bounds the two CPUs' speed ratio to ~0.5%, so it is not general
+execution speed either. What is left is cycles inside the mailbox protocol itself - how many clocks
+each comm-register handshake edge costs between the two domains - and that needs a different probe
+(count clk_sys between the main CPU's command write and the sub-CPU's first read of it), not another
+latency histogram.
+
+**Do not "fix" this by adjusting a constant.** Three separate hypotheses have now been killed by
+measurement; the honest state is that the mechanism for the last 1.8% is not identified.
+
 ### CDC FLAGS 41 measured: two candidate causes ELIMINATED with numbers
 
 Measured on r42 with the telemetry already compiled in - no rebuild needed.
