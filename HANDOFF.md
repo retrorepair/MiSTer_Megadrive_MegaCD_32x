@@ -45,37 +45,39 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
-**0. Night Trap's horizontal offset: the DISPLAY IS INNOCENT. The image arrives narrow.**
+**0. Night Trap's horizontal offset — narrowed to the DISPLAY LINE BUFFER. Not yet proven.**
 
-Measured against the displayed buffer (FS read live from beat 12), sampling at 12/16/20 s with the
-screenshot size checked so blank frames are discarded:
+Captured (`scratch/shots/b8.png`): the intro globe fills the LEFT ~55% and is CLIPPED at the left
+edge, black to the right. User reports it intermittently stalls and that a sliver of the left side
+then appears on the FAR RIGHT — i.e. wrap-around, not truncation.
 
-```
-t=12s  FS=0  LT[50,100,150] = 0x0CD8, 0x2C18, 0x4B58   stride exactly 160 words = 320 px
-              line100 data ends at word 120 of 160  (242 of 320 px)
-t=20s  FS=0  LT ramp again                              line100 ends at word 111 (224 of 320 px)
-```
+Eliminated by measurement, all on hardware:
+* **Not the MD video path or the overlay** — the Mega CD BIOS screen renders perfectly centred
+  (`scratch/shots/b2.png`).
+* **Not the bitmap mode** — `MODE` read live from beat 12 bits [5:4] during playback is **1 =
+  packed pixel** (2 px/word, 160 words/line). Not a direct-colour/packed mix-up.
+* **Not the line table** — a correct ramp, stride exactly 160 words = 320 px.
+* **Not the run-length decoder** — the mode is not RLE.
+* An earlier note here said "the image arrives in the buffer narrow"; that was sampled badly and the
+  wrap-around observation contradicts it. Disregard it.
 
-Three things follow, and they eliminate every hypothesis previously entertained here:
+**Prime suspect: the display line buffer is SINGLE-buffered.** `s32x_ddr.sv` has one `linebuf[128]`,
+and `lp_base`/`lp_start` update the moment a new line's table entry is read. The VDP indexes it as
+`LB_OFFS = LINE_LEAD[16:1] - LP_BASE` with `LINE_LEAD` latched at `H_CNT == 0x16`. If a prefetch
+slips out of HBLANK into the visible region, `LP_BASE` changes mid-line and the index jumps by a
+whole line — the display starts reading the NEXT line's data, which is a leftward shift whose
+displaced part shows up on the right. The buffer being overwritten while it is still being read has
+the same effect.
 
-1. **The line table is correct.** A clean ramp, stride exactly 160 words = 320 pixels. It maps screen
-   line N to buffer row N-31 consistently, which is the game placing the video vertically, not a bug.
-   (The earlier "uniform 0x0100" reading was sampled on blank frames - lines 0-2 and 200+ genuinely
-   hold 0x100, the ramp covers the video's rows.)
-2. **The display shows what the buffer holds.** Content ends on screen at roughly the same x where
-   the buffer's data ends. So this is NOT genlock, NOT the H counter, NOT the line-table base, and
-   NOT the run-length decoder - the theory in the previous revision of this section was wrong.
-3. **The buffer line is genuinely blank past ~224-242 px** - every word from ~112 to 159 reads zero.
-   The right quarter to third of EVERY line is never written.
+**Why CD32X exposes it and cart-only 32X does not** (the user's hypothesis, and it holds up): during
+disc playback the same DDR3 port is servicing heavy frame-buffer WRITES as video is blitted in, which
+is exactly what would delay a display prefetch. A cart 32X game does not generate that write load.
 
-**So the fault is upstream of the 32X VDP, in the path that writes video into the frame buffer**
-(Mega CD -> 32X FB). Night Trap streams disc video and something is writing short lines.
-
-Next step: `tools/phase55_fbwrite_probe.py` already exists and records frame-buffer write addresses;
-point it at the X extent instead - capture min and max `FIFO_FB_A[7:1]` (the word offset within a
-line) per frame, plus a count of writes per line. If the writes stop at ~112 words the write loop or
-its length is short; if they cover 160 words but land at wrong addresses, it is the destination
-stride. Also worth checking whether the source is 256 px wide and expected to be centred.
+Next, in order: (1) instrument whether `lp_done` ever lands after HDISP starts — a single flag
+counting prefetches that complete outside HBLANK settles it in one build; (2) if so, either
+double-buffer `linebuf` (a packed-pixel line needs only 40 of its 128 beats, so a ping-pong fits) or
+latch `lp_base`/`lp_start` into the VDP at `H_CNT == 0x16` alongside `LINE_LEAD` so a late prefetch
+cannot move the index mid-line. (2) is the smaller change and is worth trying first.
 
 **1. Fusion fails to reach its menu on ~50% of boots.** Fully characterised, cause NOT found.
 
