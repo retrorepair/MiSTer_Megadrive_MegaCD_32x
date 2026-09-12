@@ -11,9 +11,10 @@ the Mega CD streaming video into Word RAM while the 32X's two SH-2s blit it to a
 project takes the Mega CD block from one, the 32X and SH-2 blocks from the other, puts them on a single
 Mega Drive, and makes the whole thing fit in one Cyclone V.
 
-**Current release:** `releases/MegaCD_MD_MCD_32X_r7.rbf`. Timing closes with margin, every tier
-runs on real hardware. It is not finished — see [Status](#status) and [Known gaps](#known-gaps) for an
-honest account of what has and has not been demonstrated.
+**Current release:** `releases/MegaCD_MD_MCD_32X_r38_fifo_fbsel.rbf`. Timing closes with margin, every
+tier runs on real hardware, and a thirteen-title sweep is clean. It is not finished — see
+[Status](#status) and [Known gaps](#known-gaps) for an honest account of what has and has not been
+demonstrated.
 
 ---
 
@@ -27,8 +28,8 @@ work. "Gameplay" means interactive play was reached; anything else says how far 
 | Mega Drive cartridge | Alien 3 | gameplay |
 | Mega CD disc | 3 Ninjas Kick Back | **gameplay** |
 | Mega CD disc | Cobra Command | full-motion video |
-| Mega CD disc | AH-3 Thunderstrike, Adventures of Batman & Robin, Bram Stoker's Dracula | title screen |
-| Mega CD disc | Earthworm Jim Special Edition | intro |
+| Mega CD disc | Adventures of Batman & Robin, Earthworm Jim Special Edition | running and animating |
+| Mega CD disc | AH-3 Thunderstrike, Bram Stoker's Dracula | title screen |
 | Mega CD, no disc | BIOS | boots, logo animation clean |
 | 32X cartridge | Knuckles Chaotix | **gameplay** |
 | 32X cartridge | Doom | title and menu |
@@ -36,27 +37,38 @@ work. "Gameplay" means interactive play was reached; anything else says how far 
 | 32X cartridge | Star Wars Arcade | intro |
 | **CD32X** | Night Trap, Corpse Killer, Supreme Warrior | **live full-motion video through the 32X frame buffer** |
 | **CD32X** | Slam City with Scottie Pippen | **interactive level-select menu** |
+| **CD32X** | Doom CD32X Fusion | **boots to its SELECT GAME menu** |
+| **CD32X** | Fahrenheit | running and animating |
 
-All four tiers run. The CD32X tier, the one no other core can do at all, now has three titles playing
-video and a fourth reaching an interactive menu.
+All four tiers run. The CD32X tier, the one no other core can do at all, has three titles playing
+video and two more reaching an interactive menu — including Doom CD32X Fusion, a mode 1 title that
+drives the Mega CD from a cartridge and reads its WAD off the disc while both SH-2s run the game.
 
-Read the sample size honestly: only **one** Mega Drive cartridge has been tested, and only one Mega CD
-disc and one 32X cartridge have reached actual gameplay. Two titles are known NOT to run, listed under
-[Known gaps](#known-gaps).
+"Running and animating" is weaker than the rows above it and means exactly what it says: the sweep
+found the 68000 executing, no wild jump on either SH-2, the CD streaming where a disc is involved, and
+the picture different between two screenshots three seconds apart. It is not a claim that the title was
+played.
 
-**Soak:** twelve minutes of Night Trap with the liveness counter advancing at every one of 24 samples
-and all 24 frames distinct; ten minutes of 3 Ninjas in gameplay with 18 of 20 frames distinct. Roughly
-41 minutes of earlier soak across four tiers with no stall.
+Read the sample size honestly: only a handful of titles per tier, and only three have reached extended
+gameplay. Titles known NOT to run are listed under [Known gaps](#known-gaps).
 
-**Fit and timing** (release r3, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
+**Soak:** ten minutes of Doom CD32X Fusion with no fault; twelve minutes of Night Trap with the
+liveness counter advancing at every one of 24 samples and all 24 frames distinct; ten minutes of
+3 Ninjas in gameplay with 18 of 20 frames distinct. Night Trap streams at 75.0 sectors/s with a
+13.33 ms period, against 13.333 ms on hardware.
+
+**Fit and timing** (release r38, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
 
 | | |
 |---|---|
-| Logic | 32,187 / 41,910 ALMs (77%) |
+| Logic | 32,945 / 41,910 ALMs (79%) |
 | Block RAM | 539 / 553 M10K (97%) |
 | DSP | 61 / 112 (54%) |
-| clk_sys setup slack | +0.756 ns |
-| clk_ram setup slack | +0.425 ns |
+| clk_sys setup slack | +1.353 ns |
+| clk_ram setup slack | +0.578 ns |
+| worst setup slack in the design | +0.383 ns (`pll_hdmi`, framework scaler) |
+
+Every clock domain has positive setup and hold slack.
 
 Block RAM count is the binding constraint, not logic: 97% of the blocks are in use while only 73% of
 the bits inside them are. That single fact drove most of the architecture below.
@@ -128,7 +140,7 @@ scanline of frame buffer is one ~1 µs request. That drops the SDRAM to ~34%.
 | `0x000000` | SH-2 work RAM, 256 KB |
 | `0x100000` | 32X frame buffer 0, 128 KB |
 | `0x120000` | 32X frame buffer 1, 128 KB |
-| `0x200000` | debug telemetry beats (compiled out of release builds) |
+| `0x200000` | debug telemetry beats (`TELEMETRY` in `s32x_ddr.sv`; on in r38) |
 
 `core/rtl/s32x_ddr.sv` is the one substantial piece of RTL written for this project. It presents the
 frame buffers and SH-2 RAM to the 32X as if they were local memory: the display side prefetches a
@@ -165,7 +177,8 @@ CEGen-produced 50 MHz enable, rather than upstream's 13.42 MHz which was 7.4% fa
 
 - **The Mega Drive is fpgagen, not NukedMD.** This was a deliberate choice: fpgagen is far smaller, and
   nothing else would fit alongside both add-ons. The cost is accepted — cycle-exact 68000 behaviour is
-  not claimed, and test suites that probe it are expected to fail.
+  not claimed. It is worth saying that the verificator failures below turned out **not** to be that
+  cost: they are SDRAM contention, and the arithmetic is in [Known gaps](#known-gaps).
 - **32X frame-buffer read timing.** The real 32X VDP reads the line-table entry at the first active
   pixel and the pixels just in time; here both are read during the preceding HBLANK, about 10 µs early.
   This is a hardware limitation of external memory latency and is commented as such in the RTL. Only
@@ -198,7 +211,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | Port PCM wave RAM into SDRAM | **Done** — saved ~64 M10K |
 | Port the CDC `SECTOR_ACTIVE` / frame-timer fixes | **Done** |
 | Port the ASIC INT2 acknowledge fix | **Done** |
-| Re-run the verificator to get an fpgagen baseline | **Done** — 14 of 18 pass on r7 |
+| Re-run the verificator to get an fpgagen baseline | **Done** — 14 of 18 pass, unchanged from r7 to r38 |
 
 ### Phase 2 — Mega Drive + 32X
 
@@ -209,7 +222,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | The accurate 23.011 MHz SH-2 enable | **Done** |
 | Video overlay mixer (32X over MD) | **Done** |
 | Milestone: 32X boot ROM → VRDX → Doom → Chaotix | **Done** — all four, Chaotix in gameplay |
-| Prove fit and timing with everything present | **Done** — 77% ALMs, 97% M10K, timing closes |
+| Prove fit and timing with everything present | **Done** — 79% ALMs, 97% M10K, timing closes |
 
 ### Phase 3 — Mega CD with the 32X present
 
@@ -219,7 +232,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | `$000000` boot precedence | **Done** |
 | Shared reset across three units | **Partial** — MD and Mega CD correct; 32X `VRES_N`/`MRES_N` **stubbed** (tied inactive, as srg320 does) |
 | Mega CD PCM/CDDA and 32X PWM coexisting in the mix | **Done** — but see the audio gap below |
-| Verificator | **Open** |
+| Verificator | **Root-caused, not fixed** — 4 of 18 fail, all on SDRAM contention (see Known gaps) |
 
 ### Phase 4 — CD32X
 
@@ -227,17 +240,18 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 |---|---|
 | Night Trap streaming disc video through the 32X frame buffer | **Done** — live FMV, 12-minute soak |
 | Tune SDRAM port priorities and frame-buffer prefetch | **Done** |
-| Acceptance: all six CD32X titles boot and play | **Partial** — Night Trap, Corpse Killer and Supreme Warrior play video, Slam City reaches an interactive menu, Surgical Strike does not boot, Fahrenheit untested |
+| Acceptance: all six CD32X titles boot and play | **Partial** — Night Trap, Corpse Killer and Supreme Warrior play video, Slam City reaches an interactive menu, Fahrenheit runs, Surgical Strike does not boot |
+| Doom CD32X Fusion (mode 1: the Mega CD driven from a cartridge) | **Done** — boots to its SELECT GAME menu; ten-minute soak clean |
 
 ### Phase 5 — hardening and accuracy
 
 | Task | Status |
 |---|---|
-| Timing closure | **Done** — +0.756 ns clk_sys; the worst path in the design is now in the framework's scaler |
-| Long soak | **Partial** — longest single run 12 minutes; no multi-hour soak |
-| DDR3 telemetry technique for live state | **Done** — and it found three of the hard bugs |
+| Timing closure | **Done** — +1.353 ns clk_sys; the worst path in the design is in the framework's scaler at +0.383 ns |
+| Long soak | **Partial** — longest single runs 12 minutes (Night Trap) and 10 minutes (Fusion); no multi-hour soak |
+| DDR3 telemetry technique for live state | **Done** — and it found five of the hard bugs |
 | 32X test ROMs (SH-2 timing, PWM) | **Not done** |
-| Verificator for the MD/MCD side | **Runs** — 14 of 18 pass; 3 failures are the accepted fpgagen cost, 1 (CDC flags) is open |
+| Verificator for the MD/MCD side | **Runs** — 14 of 18 pass; all 4 failures are one cause, SDRAM contention, and none of them is the fpgagen cost they were assumed to be |
 | Audio verified by listening | **Done** — confirmed correct by ear across the tiers heard |
 | Backup RAM / SRAM save and load tested | **Not done** |
 
@@ -258,17 +272,29 @@ has no such signal.
 
 Read this before trusting the core with anything important.
 
-- **mcd-verificator now completes, with 4 of 18 tests failing.** It hung at "System init…" from the
-  start of this project until r7. Variable tests and register $8030 probe cycle-exact 68000 behaviour
-  and are the accepted cost of fpgagen; the IRQ test fails on the NukedMD reference core too. **CDC
-  flags is the one worth chasing**, since it is not a CPU-accuracy test.
-- **Doom CD32X Fusion does not boot.** The first real title found that drives the Mega CD from a
-  cartridge, which is "mode 1" — the same path mcd-verificator fails on, so the two are very likely one
-  defect. Its CD init times out after about 2.6 seconds and carries on as though no disc were present,
-  so the symptom is a black screen with a perfectly healthy 32X rather than a crash. Region, ROM size,
-  disc sector format and load order have all been ruled out.
-- **Surgical Strike did not boot**, and **Fahrenheit is untested** — only its disc 2 was tried, and
-  disc 1 is the key disc that boots.
+- **mcd-verificator completes, with 4 of 18 tests failing** — VAR TESTS 02, IRQ TEST 09, REG 8030 07
+  and CDC FLAGS 40. These were written off as the fpgagen cycle-accuracy cost. That was **wrong**, and
+  all four have one shared cause: the main 68000 fetches its instructions from cartridge ROM on the
+  same SDRAM controller the Mega CD sub-CPU reads PRG-RAM from, so its bus cycles are stretched by
+  contention. Measured: sub-CPU PRG-RAM at 2.13M reads/s × 65 ns = 13.7% controller occupancy, ~1.7% of
+  a 521 ns 68000 bus cycle, plus ~0.9% refresh ≈ **2.6%** — against the **2.59%** speed-up CDC FLAGS
+  needs to pass. Ruled out with arithmetic or on hardware: the sub-CPU clock (exactly 12,500,000.000 Hz
+  — `CEGen` is an integer accumulator and 2,147,727 × 25 = 53,693,175), the main clock (exactly
+  53,693,175/7), the `prg_first` port priority (A/B'd through `MegaCD.CFG` bit 24: no effect on any of
+  the four), and SH-2 contention (both PCs read 0 for a non-32X cartridge). The fix is a small cache on
+  the PRG-RAM SDRAM port — the sub-CPU's working set measures ~50 distinct words, so temporal locality
+  alone would collapse that 13.7%. Moving PRG-RAM to DDR3 would also work and is **rejected**: the
+  SDRAM is on the board for deterministic latency, and DDR3 is shared with Linux, which is reading CD
+  data during exactly the workloads that matter.
+- **Doom CD32X Fusion boots to its SELECT GAME menu**, and a ten-minute soak was clean, but **one boot in four
+  ends in a black screen** (3 of 12 on r38, every reload verified; earlier builds were worse).
+  The mechanism is known end to end: the game reads `numtextures` from the CD file buffer, which is the
+  32X frame buffer at SH-2 `0x24000200`, gets `0xFFFFFFFF` = −1, and calls `memset(ptr, 0, -20)`, which
+  zeroes all 256 KB of 32X work RAM including the slave's code. What is *not* known is the last step
+  back: a live DDR3 trace of a failing boot shows the buffer taking real CD data, being cleared
+  normally, and then **87% of it being filled with 0xFF** in the same instant — so this is a CD read
+  that delivered all-ones, not a write that went missing.
+- **Surgical Strike did not boot.**
 - **A 32X horizontal offset is under investigation.** Night Trap's intro video has been seen sitting
   well to the left, but not reproducibly, and not in every region. Parked.
 - **Saves are untested.** Backup RAM and cartridge SRAM/EEPROM save and load paths exist and are wired,
@@ -328,7 +354,15 @@ probe can be read as instructions.
 
 **The `phase4`/`phase5`/`phase6` probe scripts produce diagnostic-only builds** that force-terminate bus
 cycles nothing acknowledges. Real hardware waits for `/DTACK` indefinitely. Those builds must never be
-released; they live on a separate branch and release builds have telemetry compiled out.
+released; they live on a separate branch. Telemetry itself is harmless and **is compiled into r38**
+(`TELEMETRY = 1` in `core/rtl/s32x_ddr.sv`), which is what lets the tools above read a shipping build.
+
+**Verify that a test actually rebooted the core.** A harness that writes `load_core` to
+`/dev/MiSTer_cmd` and then screenshots will happily screenshot the *previous* boot: MiSTer silently
+ignores a request naming a file that does not exist, and the MGL names are `MegaCD_<tag>_<title>.mgl`,
+not `<tag>_<title>.mgl`. Twelve "clean boots" were once one boot photographed twelve times. Check that
+MiSTer's pid changes before you start timing, and make the harness fail loudly if the MGL is missing —
+`tools/mister/boottest.py` does both.
 
 ## Repository layout
 
