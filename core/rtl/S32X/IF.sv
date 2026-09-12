@@ -1121,18 +1121,8 @@ module S32X_IF
 	assign CASEL_N = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_CE0 : ASEL_N_SYNC;
 	assign CLWR_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_LWR : LWR_N_SYNC[0];
 	assign CUWR_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_UWR : UWR_N_SYNC[0];
-	// The `&& S32X_CE0` qualifier is deliberately ABSENT from these two (tools/phase44_cart_strobe_leak.py).
-	// With it, the 68000's raw /CE0 and /CAS0 reached the cartridge whenever the arbiter was between
-	// grants, and cart.sv turns those into ROM_RD -> the SDRAM's port-0 read strobe. sdram.sv starts a
-	// transaction on a RISING EDGE only and holds old_rd while the strobe stays high, so an
-	// unarbitrated MD read left rd0 already high when the SH-2 was granted: the SH-2's request never
-	// produced an edge, was never issued, and it captured the 68000's word from the 68000's address.
-	// Driving them from the arbiter alone means rd0 falls between grants and every access gets a clean
-	// edge. MD cartridge cycles still reach the cart through RS_MD_RW, which reproduces the MD's own
-	// strobes. CASEL_N/CLWR_N/CUWR_N below KEEP the qualifier: the arbiter never grants for register
-	// cycles such as $A130F1, and gating those would break SRAM banking.
-	assign CCE0_N  = ADCR.ADEN && !DCR.RV ? ~S32X_CE0 : MD_BIOS_SEL | CE0_N_SYNC[0];
-	assign CCAS0_N = ADCR.ADEN && !DCR.RV ? ~S32X_CAS0 : CAS0_N_SYNC[0];
+	assign CCE0_N  = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_CE0 : MD_BIOS_SEL | CE0_N_SYNC[0];
+	assign CCAS0_N = ADCR.ADEN && !DCR.RV && S32X_CE0 ? ~S32X_CAS0 : CAS0_N_SYNC[0];
 	assign CCAS2_N = CAS2_N_SYNC;
 
 	assign SEL = SH_ROM_GRANT;

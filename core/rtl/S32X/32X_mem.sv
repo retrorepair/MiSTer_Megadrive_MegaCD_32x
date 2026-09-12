@@ -10,20 +10,22 @@ module VDPFIFO (
 	EMPTY,
 	FULL);
 
+	// 36 bits, not 35: the extra bit carries the frame-buffer select with each queued write
+	// (tools/phase52_fifo_carries_fb.py). An 8-word MLAB, so the width costs nothing.
 	input	  CLK;
-	input	[34:0]  DATA;
+	input	[35:0]  DATA;
 	input	  RDREQ;
 	input	  WRREQ;
 	output	  EMPTY;
 	output	  FULL;
-	output	[34:0]  Q;
+	output	[35:0]  Q;
 
 	wire  sub_wire0;
 	wire  sub_wire1;
-	wire [34:0] sub_wire2;
+	wire [35:0] sub_wire2;
 	wire  EMPTY = sub_wire0;
 	wire  FULL = sub_wire1;
-	wire [34:0] Q = sub_wire2[34:0];
+	wire [35:0] Q = sub_wire2[35:0];
 
 //	scfifo	scfifo_component (
 //				.clock (CLK),
@@ -70,7 +72,7 @@ module VDPFIFO (
 		scfifo_component.lpm_numwords = 8,
 		scfifo_component.lpm_showahead = "ON",
 		scfifo_component.lpm_type = "scfifo",
-		scfifo_component.lpm_width = 35,
+		scfifo_component.lpm_width = 36,
 		scfifo_component.lpm_widthu = 3,
 		scfifo_component.overflow_checking = "ON",
 		scfifo_component.underflow_checking = "ON",

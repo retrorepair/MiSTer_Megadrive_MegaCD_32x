@@ -28,6 +28,7 @@ module S32X_VDP
 	output            HINT,
 
 	// frame-buffer draw port (rtl/s32x_ddr.sv)
+	output     [31:0] DBG_FB,		// tools/phase49_fb_select_probe.py
 	output            FBD_FB,		// buffer being drawn (= ~FS)
 	output     [15:0] FBD_A,
 	output     [15:0] FBD_DO,
@@ -80,12 +81,13 @@ module S32X_VDP
 	bit        HDISP[3];
 	bit        RFRH;
 
-	bit [34:0] FIFO_D;
-	bit [34:0] FIFO_Q;
+	bit [35:0] FIFO_D;
+	bit [35:0] FIFO_Q;
 	bit        FIFO_WR;
 	bit        FIFO_RD;
 	bit        FIFO_EMPTY;
 	bit        FIFO_FULL;
+	bit        FIFO_FB_FB;		// the draw bank this entry was queued for (phase52)
 	bit [17:1] FIFO_FB_A;
 	bit [15:0] FIFO_FB_D;
 	bit  [1:0] FIFO_FB_WE;
@@ -195,7 +197,8 @@ module S32X_VDP
 						end
 					end
 				end else if ((!LWR_N || !UWR_N) && !FIFO_FULL) begin
-					FIFO_D <= {A[17:1],~UWR_N,~LWR_N,DI};
+					// capture the draw bank WITH the write: FS can flip before this entry drains
+					FIFO_D <= {~FS,A[17:1],~UWR_N,~LWR_N,DI};
 					FIFO_WR <= 1;
 					ACK_N <= 0;
 				end
@@ -235,6 +238,7 @@ module S32X_VDP
 		bit  [2:0] FIFO_FB_WAIT;
 
 		if (!RST_N) begin
+			FIFO_FB_FB <= 0;
 			FIFO_FB_A <= '0;
 			FIFO_FB_D <= '0;
 			FIFO_FB_WE <= '0;
@@ -245,7 +249,7 @@ module S32X_VDP
 		else begin
 			FIFO_RD <= 0;
 			if (!FIFO_EMPTY && !FIFO_FB_WRITE && !FBD_BUSY) begin
-				{FIFO_FB_A,FIFO_FB_WE,FIFO_FB_D} <= FIFO_Q;
+				{FIFO_FB_FB,FIFO_FB_A,FIFO_FB_WE,FIFO_FB_D} <= FIFO_Q;
 				FB_WR <= 1;
 				FIFO_RD <= 1;
 				FIFO_FB_WAIT <= 3'd5;
@@ -513,8 +517,39 @@ module S32X_VDP
 	                                                                FB_WR & FIFO_FB_WE[0] & ((|FIFO_FB_D[ 7:0] & FIFO_FB_A[17]) | ((|FIFO_FB_D[ 7:0] | FIFO_FB_WE[1]) & ~FIFO_FB_A[17]))};
 	assign FB_DRAW_RD = FILL_EXEC ? 1'b0 : FB_RD;
 
-	// the drawn buffer is the one not displayed: FS=1 displays buffer 1 and draws buffer 0
-	assign FBD_FB = ~FS;
+	// The drawn buffer is the one not displayed: FS=1 displays buffer 1 and draws buffer 0.
+	// A QUEUED write uses the bank it was queued for, not whatever is current when it drains
+	// (tools/phase52_fifo_carries_fb.py) - otherwise a flip mid-FIFO sends it to the wrong buffer.
+	// Reads and the auto-fill engine are generated in real time and correctly use the live bank;
+	// FB_WR and FB_RD never overlap because the read path is gated on !FIFO_FB_WRITE && FIFO_EMPTY.
+	assign FBD_FB = (!FILL_EXEC && FB_WR) ? FIFO_FB_FB : ~FS;
+
+	// How often does the draw buffer actually move? (tools/phase49_fb_select_probe.py) A 128 KB
+	// I_TempBuffer clear spans several frames, so if FS toggles per frame the clear is scattered
+	// across both buffers and the read-back lands in the wrong one.
+	// FS at the exact accesses that decide the failure: the write of frame-buffer word 0x100
+	// (SH-2 byte offset 0x200) and the read-back of the same word, which is where the game gets
+	// numtextures. If these disagree on a failing boot, the bank mismatch is proven at the access.
+	bit  [7:0] DBG_WR_N_, DBG_RD_N_;
+	bit        DBG_FS_WR, DBG_FS_RD;
+	always @(posedge CLK or negedge RST_N) begin
+		if (!RST_N) begin
+			DBG_WR_N_ <= '0; DBG_RD_N_ <= '0; DBG_FS_WR <= 0; DBG_FS_RD <= 0;
+		end
+		else begin
+			// the queued write, taken as it is handed to the DDR3 port
+			if (FB_WR && FIFO_FB_A == 17'h00100) begin
+				DBG_FS_WR <= FS;
+				if (~&DBG_WR_N_) DBG_WR_N_ <= DBG_WR_N_ + 8'd1;
+			end
+			// the SH-2 read of the same word
+			if (!RD_N && !DRAM_CS_N && A[17:1] == 17'h00100) begin
+				DBG_FS_RD <= FS;
+				if (~&DBG_RD_N_) DBG_RD_N_ <= DBG_RD_N_ + 8'd1;
+			end
+		end
+	end
+	assign DBG_FB = {DBG_WR_N_, DBG_RD_N_, 8'h00, DBG_FS_WR, DBG_FS_RD, MODE, 2'b00, FBCR.FS, FS};
 	assign FBD_A  = FB_DRAW_A;
 	assign FBD_DO = FB_DRAW_D;
 	assign FBD_WE = FB_DRAW_WE;

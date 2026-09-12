@@ -912,7 +912,59 @@ always @(posedge clk_sys) begin
 		end
 	end
 end
-wire [63:0] tel_trap = {jump_from, jump_to};
+wire [63:0] tel_trap = {ms_from1, ms_from2};
+
+// Catch the caller of the memset that never returns (tools/phase45_memset_caller.py). Trail the
+// last distinct PCs while OUTSIDE memset, count clk_sys spent continuously INSIDE it, and freeze
+// when that saturates: 24 bits is 0.31 s, where the largest legitimate memset here is about 6 ms.
+reg [31:0] ms_d, ms_1, ms_2, ms_3, ms_4;
+reg [31:0] ms_p1, ms_p2, ms_p3, ms_p4;			// trail snapshotted at the call
+reg [31:0] ms_from1, ms_from2, ms_from3, ms_from4;
+reg [23:0] ms_cnt;
+reg        ms_hit;
+wire       ms_in    = (S32X_MSH_PC >= 32'h0201FD18) && (S32X_MSH_PC <= 32'h0201FD56);
+// the memset prologue - reaching it means a NEW call, which is the only thing that may reset the
+// counter. Leaving the range must NOT: the master's 60 Hz VBlank interrupt does that every ~16 ms.
+wire       ms_entry = (S32X_MSH_PC >= 32'h0201FD18) && (S32X_MSH_PC <= 32'h0201FD20);
+always @(posedge clk_sys) begin
+	if (reset) begin
+		ms_d <= 0; ms_1 <= 0; ms_2 <= 0; ms_3 <= 0; ms_4 <= 0;
+		ms_p1 <= 0; ms_p2 <= 0; ms_p3 <= 0; ms_p4 <= 0;
+		ms_from1 <= 0; ms_from2 <= 0; ms_from3 <= 0; ms_from4 <= 0;
+		ms_cnt <= 0; ms_hit <= 0;
+	end
+	else if (!ms_hit) begin
+		if (S32X_MSH_PC != ms_d) begin
+			ms_d <= S32X_MSH_PC;
+			if (!ms_in) begin
+				ms_4 <= ms_3;
+				ms_3 <= ms_2;
+				ms_2 <= ms_1;
+				ms_1 <= ms_d;
+			end
+		end
+		// A new call: reset the counter AND snapshot who called it. Latching the live trail at
+		// saturation instead reported the VBlank ISR's RTE, because interrupts leave the memset
+		// range constantly while a long call runs.
+		if (ms_entry) begin
+			ms_cnt <= 24'd0;
+			ms_p1  <= ms_1;
+			ms_p2  <= ms_2;
+			ms_p3  <= ms_3;
+			ms_p4  <= ms_4;
+		end
+		else if (ms_in) begin
+			ms_cnt <= ms_cnt + 24'd1;
+			if (&ms_cnt) begin
+				ms_hit   <= 1;
+				ms_from1 <= ms_p1;
+				ms_from2 <= ms_p2;
+				ms_from3 <= ms_p3;
+				ms_from4 <= ms_p4;
+			end
+		end
+	end
+end
 
 // Mega CD main/sub communication flags (tools/phase31_cd_handshake.py). Fusion's master is waiting
 // on play_cd_roq_file and no sectors are being delivered, so the question is whether the Mode-1
@@ -986,7 +1038,9 @@ always @(posedge clk_sys) begin
 	end
 end
 // repurposed by tools/phase41_jump_trail.py: the two PCs before the wild jump
-wire [63:0] tel_int = {pc_ctx1, pc_ctx2};
+wire [63:0] tel_int = {ms_from3, S32X_DBG_FB};
+wire unused_ms4 = |ms_from4;
+wire unused_jt = |{jump_from, jump_to, pc_ctx1, pc_ctx2};
 wire unused_int = |{S32X_INT, tel_intm_set, tel_intm_clr};
 
 wire [63:0] tel_sub = {MCD_DBG_A[23:1], 1'b0,
@@ -1020,6 +1074,7 @@ wire [15:0] S32X_SDR_DI, S32X_SDR_DO;
 wire        S32X_SDR_CS, S32X_SDR_RD, S32X_SDR_WAIT;
 wire  [1:0] S32X_SDR_WE;
 wire        S32X_FBD_FB, S32X_FBD_RD, S32X_FBD_BUSY, S32X_FBD_RDY;
+wire [31:0] S32X_DBG_FB;		// tools/phase49_fb_select_probe.py
 wire [15:0] S32X_FBD_A, S32X_FBD_DO, S32X_FBD_DI;
 wire  [1:0] S32X_FBD_WE;
 wire        S32X_LP_REQ, S32X_LP_FB;
@@ -1083,6 +1138,7 @@ S32X #(.USE_ROM_WAIT(1)) S32X
 	.SDR_RD(S32X_SDR_RD),
 	.SDR_WAIT(S32X_SDR_WAIT),
 
+	.DBG_FB(S32X_DBG_FB),
 	.FBD_FB(S32X_FBD_FB),
 	.FBD_A(S32X_FBD_A),
 	.FBD_DO(S32X_FBD_DO),

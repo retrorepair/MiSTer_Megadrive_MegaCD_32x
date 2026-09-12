@@ -2084,3 +2084,67 @@ buffer select (VDP.sv:198 queues {A[17:1],WE,DI}; FBD_FB = ~FS is sampled when t
 so writes queued before a flip commit to the buffer selected after it. It misdirects at most the
 8 entries in flight, which is why it was not pursued as the cause here - but it is wrong and
 fixing it needs VDPFIFO widened from 35 to 36 bits (32X_mem.sv, a fixed-width megafunction).
+
+## mcd-verificator: the four failures are ONE cause, and it is not fpgagen
+
+The long-standing assumption that VAR TESTS and REG 8030 are "the accepted fpgagen cycle-accuracy
+cost" is **wrong**. All four remaining failures are small timing deficits with a single shared cause.
+
+### What was ruled out, with arithmetic
+
+**Sub-CPU clock: exact.** CEGen is an integer accumulator, not a rounding divider
+(`CLK_SUM := CLK_SUM + OUT_CLK; if CLK_SUM >= IN_CLK then CLK_SUM := CLK_SUM - IN_CLK`), so it emits
+exactly OUT_CLK pulses per second with no drift. EN50 = 50,000,000 exactly; ASIC.vhd divides by 4 for
+CLK_12M_F/R which drive S68K_CE_F/R. f_sub = 53,693,175 x 12,500,000/53,693,175, and since
+2,147,727 x 25 = 53,693,175 that is **12,500,000.000 Hz, error 0.0000000%**.
+
+**Main CPU clock: exact.** gen.sv:168-173 divides by 7 -> 7,670,453.571 Hz, the true NTSC figure.
+
+**Independent software proof the sub-CPU timebase is right:** REG 8030 measures the SUB-CPU's timer
+against the MAIN CPU's clock and reads 0.31% LOW (1283 vs 1286-1288). A 4% slow sub-CPU would read
+4% HIGH. The timer divider is exact too: 384 x 80.000 ns = 30.7200 us (hardware 30.72 us).
+
+**PRG-RAM port priority: TESTED ON HARDWARE, NO EFFECT.** `prg_first` is already wired to OSD bit 24,
+so it was A/B'd by setting the bit in /media/fat/config/MegaCD.CFG - no rebuild needed:
+
+| | prg_first OFF | prg_first ON |
+|---|---|---|
+| VAR TESTS | 26070 ERR 02 | 26071 ERR 02 |
+| IRQ TEST | 227 ERR 09 | 227 ERR 09 |
+| REG 8030 | 1284 ERR 07 | 1284 ERR 07 |
+| CDC FLAGS | 47 ERR 40 | 47 ERR 40 |
+
+One count moved by 1. Do not pursue this again - and note the agent analysis proposed it as "THE
+ACTUAL FIX" while its own arithmetic showed wait states account for only 0.24-0.73% against the
+2.6% required.
+
+**SH-2 contention: not a factor.** Both SH-2 PCs read 00000000 throughout a verificator run (no 32X
+header on that cart, so the adapter is disabled and they are held in reset). They steal no
+cartridge-port slots.
+
+### The actual cause
+
+CDC FLAGS decoded from the test ROM: each poll iteration is TWO gate-array RPC round trips
+(~140-150 main-68K bus cycles), run by the MAIN CPU out of CARTRIDGE ROM with its variables in MD
+work RAM. The poll rate sets the COUNT; the DECI waveform sets only the DUTY, and our duty is now
+correct. Passing needs d4 >= 48 and d5 >= 71, i.e. d4+d5 >= 119; we get 47+69 = 116, so the poll
+must run **2.59% faster**. No change to the CDC can achieve that.
+
+Where 2.6% goes, from measured numbers:
+
+    sub-CPU PRG-RAM traffic  2.13M reads/s x 7 clk_ram (65 ns) = 13.7% controller occupancy
+    collision cost on a 521 ns 68000 bus cycle                 ~1.7%
+    refresh, 7 clk_ram every 766 (7.13 us)                     ~0.9%
+                                                        total  ~2.6%
+
+which is the required figure. **The MD's instruction fetches stall on an SDRAM controller shared
+with the sub-CPU's PRG-RAM.** That is a consequence of putting the cartridge and Mega CD PRG-RAM on
+one controller, not of fpgagen's 68000 timing. `prg_first` cannot help because it only reorders the
+same contention.
+
+### What would actually fix it
+Move Mega CD PRG-RAM off the shared SDRAM - to DDR3, as the 32X work RAM already is (rtl/s32x_ddr.sv
+shows the pattern, including a line cache). That removes 13.7% of controller occupancy from the
+cartridge path and should move VAR TESTS, IRQ TEST, REG 8030 and CDC FLAGS together. It is a
+substantial change with real regression risk, so it wants its own session and a full title sweep,
+not a late-night patch.
