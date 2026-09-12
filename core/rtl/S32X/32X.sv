@@ -77,6 +77,8 @@ module S32X
 	output     [15:0] PWM_R,
 
 	output     [23:0] DBG_CA,
+	input             SYNC_RELOCK,	// tools/phase65_hsync_relock.py
+	output     [31:0] DBG_SYNC,
 	output     [31:0] DBG_MSH_PC,		// tools/phase24_sh2_pc.py
 	output     [31:0] DBG_SSH_PC,
 	output     [63:0] DBG_COMM,			// tools/phase27_comm_regs.py
@@ -420,7 +422,10 @@ module S32X
 		.B(B),
 		.HS_N(HS_N),
 		.VS_N(VS_N),
-		.YSO_N(YSO_N)
+		.YSO_N(YSO_N),
+
+		.SYNC_RELOCK(SYNC_RELOCK),
+		.DBG_SYNC(DBG_SYNC)
 	);
 
 	assign DBG_CA = {CA,1'b0};

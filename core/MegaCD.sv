@@ -236,6 +236,7 @@ localparam CONF_STR = {
 	"H2O[36],MCD PRG cache,On,Off;",
 	"H2O[38],PRG cache hits,On,Off;",
 	"H2O[57],MCD PRG posted writes,On,Off;",
+	"H2O[49],32X H-lock by time,On,Off;",
 	"H2O[28],MCD PRG DTACK,Data,Early;",
 	"H2O[24],MCD PRG Priority,Normal,Above Cart;",
 	"H2-;",
@@ -916,7 +917,8 @@ always @(posedge clk_sys) begin
 		end
 	end
 end
-wire [63:0] tel_trap = {ms_from1, ms_from2};
+wire [63:0] tel_trap = {32'd0, S32X_DBG_SYNC};	// phase65: the 32X horizontal lock
+wire unused_ms12 = |{ms_from1, ms_from2};
 
 // Catch the caller of the memset that never returns (tools/phase45_memset_caller.py). Trail the
 // last distinct PCs while OUTSIDE memset, count clk_sys spent continuously INSIDE it, and freeze
@@ -1087,6 +1089,7 @@ wire [15:0] S32X_LP_START, S32X_LP_BASE;
 wire  [8:0] S32X_LB_ADDR;
 wire [15:0] S32X_LB_Q;
 wire  [4:0] S32X_R, S32X_G, S32X_B;
+wire [31:0] S32X_DBG_SYNC;
 wire        S32X_YSO_N;
 wire [15:0] S32X_PWM_L, S32X_PWM_R;
 
@@ -1169,7 +1172,9 @@ S32X #(.USE_ROM_WAIT(1)) S32X
 	.PWM_L(S32X_PWM_L),
 	.PWM_R(S32X_PWM_R),
 
-	.DBG_CA()
+	.DBG_CA(),
+	.SYNC_RELOCK(~status[49]),   // phase-independent 32X horizontal lock, DEFAULT ON; set bit 49 for upstream
+	.DBG_SYNC(S32X_DBG_SYNC)
 );
 
 // the game cartridge behind the 32X (mappers, SRAM, EEPROM); ROM and SRAM live in SDRAM port 0

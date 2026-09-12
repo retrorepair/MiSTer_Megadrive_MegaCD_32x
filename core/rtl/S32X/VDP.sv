@@ -54,7 +54,10 @@ module S32X_VDP
 	output            VS_N,
 	output            YSO_N,	//0 - 32X pixel, 1 - MD pixel
 
-	output      [7:0] DBG_DOT_TIME
+	output      [7:0] DBG_DOT_TIME,
+
+	input             SYNC_RELOCK,	// phase-independent horizontal lock (tools/phase65_hsync_relock.py)
+	output     [31:0] DBG_SYNC
 );
 	import S32X_PKG::*;
 
@@ -278,6 +281,10 @@ module S32X_VDP
 
 	bit        DOT_CLK;
 	bit        EDCLK_OLD;
+	localparam [8:0] SYNC_GUARD = 9'd300;	// no legitimate HSYNC comes sooner than a line (342 H32, 420 H40)
+	bit  [8:0] SINCE_HS;			// dots since the HSYNC we last took
+	bit  [8:0] DBG_HS_HCNT;
+	bit  [7:0] DBG_HS_ACC, DBG_HS_REJ;
 	always @(posedge CLK or negedge RST_N) begin
 		bit        HSYNC_N_OLD;
 		bit        VSYNC_N_OLD;
@@ -289,6 +296,10 @@ module S32X_VDP
 			V_CNT <= '0;
 			HSYNC_N_OLD <= 1;
 			VSYNC_N_OLD <= 1;
+			SINCE_HS <= '0;
+			DBG_HS_HCNT <= '0;
+			DBG_HS_ACC <= '0;
+			DBG_HS_REJ <= '0;
 		end
 		else begin
 			DBG_DOT_TIME <= DBG_DOT_TIME + 8'd1;
@@ -297,13 +308,35 @@ module S32X_VDP
 			if (!EDCLK_SYNC && EDCLK_OLD) begin
 				DOT_CLK <= ~DOT_CLK;
 				HSYNC_N_OLD <= HSYNC_N_SYNC;
-				if (!HSYNC_N_SYNC && HSYNC_N_OLD && H_CNT >= 9'h160) begin
+				// HORIZONTAL LOCK (tools/phase65_hsync_relock.py). This used to accept the MD's HSYNC
+				// only while H_CNT >= 0x160, a test on the counter's PHASE. The display window opens
+				// 73 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so an H_CNT of
+				// X at HSYNC displaces the whole layer by X - 0x1CE dots. Night Trap measured 68, 75 and
+				// 111 px left over three core loads - X = 0x12, 0x18, 0x3D, every one just outside the
+				// window - with a correct frame buffer, the same displacement on every line, and the
+				// fault surviving the game crashing. Once the phase is outside the window the resync can
+				// never fire again, and since the free-run period below (420) equals the MD's H40 line,
+				// the wrong phase then persists for ever. Cart 32X escapes it only because the 32X leaves
+				// reset with the MD and lands inside the window; on CD the BIOS starts it much later.
+				// So test TIME, not phase: take HSYNC once a line's worth of dots has passed since the
+				// last one taken. A second edge inside the same line is still ignored, which is all the
+				// old guard usefully did - locked, H_CNT is 0x1CE at HSYNC and SINCE_HS is a full line,
+				// so both forms accept identically - but phase can no longer lock the 32X out.
+				if (!HSYNC_N_SYNC && HSYNC_N_OLD) DBG_HS_HCNT <= H_CNT;
+				if (!HSYNC_N_SYNC && HSYNC_N_OLD &&
+				    (SYNC_RELOCK ? (SINCE_HS >= SYNC_GUARD) : (H_CNT >= 9'h160))) begin
 					H_CNT <= 9'h1CE;
 					DOT_CLK <= 1;
-				end else if (H_CNT == 9'h16C && DOT_CLK) begin
-					H_CNT <= 9'h1C9;
-				end else if (DOT_CLK) begin
-					H_CNT <= H_CNT + 9'd1;
+					SINCE_HS <= '0;
+					if (~&DBG_HS_ACC) DBG_HS_ACC <= DBG_HS_ACC + 8'd1;
+				end else begin
+					if (!HSYNC_N_SYNC && HSYNC_N_OLD && ~&DBG_HS_REJ) DBG_HS_REJ <= DBG_HS_REJ + 8'd1;
+					if (H_CNT == 9'h16C && DOT_CLK) begin
+						H_CNT <= 9'h1C9;
+					end else if (DOT_CLK) begin
+						H_CNT <= H_CNT + 9'd1;
+					end
+					if (DOT_CLK && ~&SINCE_HS) SINCE_HS <= SINCE_HS + 9'd1;
 				end
 
 				VSYNC_N_OLD <= VSYNC_N_SYNC;
@@ -330,6 +363,10 @@ module S32X_VDP
 	end
 
 	assign DOT_CE = DOT_CLK & ~EDCLK_SYNC & EDCLK_OLD;
+
+	// What the horizontal lock is doing. Locked and healthy reads H_CNT = 0x1CE with ACC climbing
+	// and REJ at zero; the Night Trap fault reads an H_CNT well below 0x160 with REJ saturated.
+	assign DBG_SYNC = {7'd0, DBG_HS_HCNT, DBG_HS_ACC, DBG_HS_REJ};
 
 
 	always @(posedge CLK or negedge RST_N) begin

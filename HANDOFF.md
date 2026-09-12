@@ -45,7 +45,7 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
-**0. Night Trap's horizontal offset — the 32X layer loses horizontal lock. Measured, not yet fixed.**
+**0. Night Trap's horizontal offset — ROOT CAUSE FOUND: the 32X loses horizontal lock to the MD. Fix built, hardware verification pending.**
 
 Captured (`scratch/shots/b8.png`): the intro globe fills the LEFT ~55% and is CLIPPED at the left
 edge, black to the right. User reports it intermittently stalls and that a sliver of the left side
@@ -89,25 +89,30 @@ What that says:
   own left border, i.e. zero displacement. Same RTL, so this is a state difference, not a static
   window misalignment.
 
-**Prime suspect now: the 32X H_CNT is missing its HSYNC resync and free-running at a stuck phase.**
-`VDP.sv:300` resynchronises the 32X's horizontal counter to the MD only when the HSYNC falling edge
-arrives with `H_CNT >= 9'h160`:
+**ROOT CAUSE FOUND, fix in `tools/phase65_hsync_relock.py`.** `VDP.sv:300` resynchronised the 32X's
+horizontal counter to the MD's HSYNC only while `H_CNT >= 9'h160` - a test on the counter's PHASE:
 
     if (!HSYNC_N_SYNC && HSYNC_N_OLD && H_CNT >= 9'h160) H_CNT <= 9'h1CE;
 
-Otherwise `H_CNT` free-runs on the `0x16C -> 0x1C9` wrap, period 420 dots. If the phase ever slips
-far enough that HSYNC arrives with `H_CNT < 0x160`, the guard stops the resync from ever firing
-again, and since the free-run period matches the MD's H40 line the wrong phase then persists
-indefinitely - a stable, arbitrary horizontal offset, exactly what is measured. The 32X window
-starts 73 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so a phase error
-lands directly on the layer's horizontal position.
+The 32X display window opens 73 dots after the resync point (`0x1CE -> 0x17` through the 9-bit
+wrap), so an `H_CNT` of X at HSYNC displaces the whole layer by `X - 0x1CE` dots. Running the three
+measured displacements backwards gives X = 0x12, 0x18 and 0x3D - every one just outside the accept
+window. Once the phase is outside it the resync can never fire again, and because the free-run
+period (420) equals the MD's H40 line the wrong phase persists for ever. A permanent lock failure,
+not a drift - which is exactly why the offset is rock steady, why it differs between core loads, and
+why it survives the game crashing.
 
-Next: one build with (a) counters for HSYNC falling edges, resyncs actually taken, and `H_CNT`
-captured at HSYNC, to confirm resyncs are being missed and by how much; and (b) latching `LP_BASE`
-into the VDP at `H_CNT == 0x16` alongside `LINE_LEAD`, which is correct regardless and costs
-nothing. If the counters show missed resyncs, the fix is to widen or drop the `H_CNT >= 9'h160`
-guard so the 32X cannot lose horizontal lock - being a slave to the MD's HSYNC is what the real
-hardware does.
+Cart 32X escapes it by luck: the 32X leaves reset with the MD and lands inside the window. On CD the
+Mega CD BIOS starts the 32X much later, so the phase lands anywhere - "mostly way left, sometimes
+way right".
+
+The fix tests TIME instead of phase: take HSYNC once a line's worth of dots has passed since the
+last one taken. A second edge inside the same line is still ignored, which is all the old guard
+usefully did - when locked, `H_CNT` is 0x1CE at HSYNC and a full line has elapsed, so both forms
+accept identically, which is why cart 32X is unaffected - but phase can no longer lock the 32X out.
+Default ON; OSD bit 49 restores the upstream guard so one bitstream A/Bs it. Telemetry beat 8 carries
+`H_CNT` at the last HSYNC, plus saturating counts of edges taken and refused
+(`tools/mister/hlock.py`).
 
 **Why CD32X exposes it and cart-only 32X does not** (the user's hypothesis, and it holds up): during
 disc playback the same DDR3 port is servicing heavy frame-buffer WRITES as video is blitted in, which
