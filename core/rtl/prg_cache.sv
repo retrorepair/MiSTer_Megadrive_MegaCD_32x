@@ -88,21 +88,6 @@ wire            wr  = wrl | wrh;
 wire [IDX-1:0]  idx = a[IDX:1];
 wire [TAGW-1:0] tag = a[24:IDX+1];
 
-// Tag/data store. Held in MLABs rather than M10K on purpose: block RAM is this design's binding
-// resource at 539 of 553 blocks, while ALMs sit at 79%.
-(* ramstyle = "MLAB, no_rw_check" *) reg [W-1:0] mem[2**IDX];
-reg  [W-1:0] q;
-reg  [W-1:0] wd;
-reg [IDX-1:0] wa;
-reg          we;
-
-always @(posedge clk) begin
-	if (we) mem[wa] <= wd;
-	q <= mem[idx];                       // one cycle of latency: valid in S_LOOK
-end
-
-wire hit = q[W-1] && q[W-2 -: TAGW] == tag;
-
 localparam S_INIT = 3'd0,   // clear every valid bit: MLABs come up undefined
            S_IDLE = 3'd1,
            S_LOOK = 3'd2,   // q is valid this cycle
@@ -119,6 +104,29 @@ reg [TAGW-1:0] q_tag;
 reg [IDX-1:0]  q_idx;
 reg [15:0] dout_r;
 
+// Tag/data store. Held in MLABs rather than M10K on purpose: block RAM is this design's binding
+// resource at 539 of 553 blocks, while ALMs sit at 79%.
+(* ramstyle = "MLAB, no_rw_check" *) reg [W-1:0] mem[2**IDX];
+reg  [W-1:0] q;
+reg  [W-1:0] wd;
+reg [IDX-1:0] wa;
+reg          we;
+
+// Index with the live address only while idle. ASIC.vhd has TWO state machines writing
+// PRG_RAM_ADDR - PRMS for the MD's window and PRSS for the sub-CPU and CDC DMA - and nothing
+// guarantees the address holds still for the whole of an access the way it does for sdram.sv, which
+// latches it on accept. Freezing the index and comparing against the tag latched with the request
+// means a mid-access address change cannot make a different entry answer for this one.
+wire [IDX-1:0] ra = (state == S_IDLE) ? idx : q_idx;
+
+always @(posedge clk) begin
+	if (we) mem[wa] <= wd;
+	q <= mem[ra];                        // one cycle of latency: valid in S_LOOK
+end
+
+wire hit = q[W-1] && q[W-2 -: TAGW] == q_tag;
+
+
 // The write data and byte enables MUST be latched with the request. ASIC.vhd's PRS_WAIT drops
 // PRG_RAM_WRL/WRH as soon as it sees busy go HIGH (PRS_WRITE, ASIC.vhd:1632) - it does not wait for
 // busy to fall - so by the time the SDRAM has finished the write, wrl/wrh/din have already gone.
@@ -128,7 +136,17 @@ reg [15:0] q_din;
 reg        q_wrl, q_wrh;
 
 assign dout = dout_r;
-assign busy = (state != S_IDLE);         // high through S_INIT too, so no request is taken early
+
+// busy must NOT rise merely because a request has been noticed. ASIC.vhd's PRS_WAIT takes
+// "busy has gone high" to mean "the SDRAM controller has accepted this request", and PRS_WRITE then
+// drops PRG_RAM_WRL/WRH immediately. sdram.sv only captures a request on the RISING edge of its
+// strobe and clears the pending flag when the strobe goes away (`old_wr <= old_wr & wr`), so a
+// strobe withdrawn before the controller is free LOSES THE WRITE outright. Acknowledging early cost
+// a whole build: the verificator ran further than before and then hung at REG X000.
+//
+// So: high while initialising, high while the SDRAM is actually serving us, and high for the hit
+// path and the tail that keeps read data stable - never in between.
+assign busy = (state == S_INIT) | (state == S_HIT) | s_busy;
 
 always @(posedge clk) begin
 	old_rd <= rd;
@@ -192,7 +210,14 @@ always @(posedge clk) begin
 				wd <= {1'b1, q_tag, s_dout};
 				we <= 1;
 				s_rd  <= 0;
-				state <= S_IDLE;
+				// Do NOT drop busy in the same cycle dout_r loads. ASIC.vhd's PRS_READ latches
+				// PRG_DI on the clock where it sees PRG_RDY go high, and clk_sys edges coincide
+				// with every other clk_ram edge, so it would latch the PREVIOUS word. sdram.sv
+				// holds its own busy two extra cycles after capturing data for exactly this
+				// reason (sdram.sv:120-127, and the matching multicycle in MegaCD.sdc); borrow
+				// the hit path's counter to do the same here.
+				hcnt  <= 4'd3;
+				state <= S_HIT;
 			end
 		end
 
