@@ -61,6 +61,12 @@ Eliminated by measurement, all on hardware:
 * An earlier note here said "the image arrives in the buffer narrow"; that was sampled badly and the
   wrap-around observation contradicts it. Disregard it.
 
+* **Not the write path** — `tools/phase64_fbwrite_extent.py` counts frame-buffer writes between FS
+  flips: **>= 65535 per frame** (the 16-bit counter saturates) against the 35,840 a full 320x224
+  8bpp frame needs, with addresses spanning `A[16:9]` 0..248, i.e. nearly the whole 128 KB. The MD
+  writes more than a full frame every frame and covers the buffer. That positively disproves the
+  retracted "arrives narrow" claim and puts the fault on the DISPLAY side.
+
 **Prime suspect: the display line buffer is SINGLE-buffered.** `s32x_ddr.sv` has one `linebuf[128]`,
 and `lp_base`/`lp_start` update the moment a new line's table entry is read. The VDP indexes it as
 `LB_OFFS = LINE_LEAD[16:1] - LP_BASE` with `LINE_LEAD` latched at `H_CNT == 0x16`. If a prefetch
