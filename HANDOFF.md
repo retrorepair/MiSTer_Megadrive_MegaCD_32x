@@ -45,7 +45,7 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
-**0. Night Trap's horizontal offset — narrowed to the DISPLAY LINE BUFFER. Not yet proven.**
+**0. Night Trap's horizontal offset — the 32X layer loses horizontal lock. Measured, not yet fixed.**
 
 Captured (`scratch/shots/b8.png`): the intro globe fills the LEFT ~55% and is CLIPPED at the left
 edge, black to the right. User reports it intermittently stalls and that a sliver of the left side
@@ -67,13 +67,47 @@ Eliminated by measurement, all on hardware:
   writes more than a full frame every frame and covers the buffer. That positively disproves the
   retracted "arrives narrow" claim and puts the fault on the DISPLAY side.
 
-**Prime suspect: the display line buffer is SINGLE-buffered.** `s32x_ddr.sv` has one `linebuf[128]`,
-and `lp_base`/`lp_start` update the moment a new line's table entry is read. The VDP indexes it as
-`LB_OFFS = LINE_LEAD[16:1] - LP_BASE` with `LINE_LEAD` latched at `H_CNT == 0x16`. If a prefetch
-slips out of HBLANK into the visible region, `LP_BASE` changes mid-line and the index jumps by a
-whole line — the display starts reading the NEXT line's data, which is a leftward shift whose
-displaced part shows up on the right. The buffer being overwritten while it is still being read has
-the same effect.
+**MEASURED, and the line-buffer theory is WRONG.** `tools/mister/ntshot.py` takes a MiSTer
+screenshot and copies both 32X frame buffers out of the shared DDR3 at the same instant;
+`tools/fbrender.py` decodes a dump (four 16-bit words per 64-bit beat, word 0 at bits 63:48 - read
+the bytes straight through and you get stripey garbage) and `tools/fbshift.py` correlates the two.
+What that says:
+
+* **The frame buffer is perfect.** The line table is a clean ramp - entries 60..67 read
+  `1818 18B8 1958 19F8 1A98 1B38 1BD8 1C78`, stride exactly 0xA0 = 160 words = 320 px, starting at
+  word 0x100 - and the picture in memory is correctly centred and full width.
+* **The screen shows that same picture displaced bodily to the left**, intact, not clipped and not
+  torn. On the "TOM ZITO presents" title the text is centred in memory and hard against the left
+  edge on screen.
+* **The displacement is identical on every line of a frame**, which is what kills the line-buffer
+  theory: a prefetch that lands late is a per-line race and would displace lines differently. It
+  also cannot produce a horizontal shift at all - `lp_start` and `lp_base` move together in
+  S_LP_TAB, so `LB_OFFS` stays right and a late prefetch shows the wrong LINE, not a shifted one.
+* **It is stable within a core load and different between loads**: -68 px, then -111 px, then -75 px
+  held steady across a 24-second run of 20 captures.
+* **Cart 32X is pixel-perfect.** Doom 32X measures dx=+14 on every line, +14 being the screenshot's
+  own left border, i.e. zero displacement. Same RTL, so this is a state difference, not a static
+  window misalignment.
+
+**Prime suspect now: the 32X H_CNT is missing its HSYNC resync and free-running at a stuck phase.**
+`VDP.sv:300` resynchronises the 32X's horizontal counter to the MD only when the HSYNC falling edge
+arrives with `H_CNT >= 9'h160`:
+
+    if (!HSYNC_N_SYNC && HSYNC_N_OLD && H_CNT >= 9'h160) H_CNT <= 9'h1CE;
+
+Otherwise `H_CNT` free-runs on the `0x16C -> 0x1C9` wrap, period 420 dots. If the phase ever slips
+far enough that HSYNC arrives with `H_CNT < 0x160`, the guard stops the resync from ever firing
+again, and since the free-run period matches the MD's H40 line the wrong phase then persists
+indefinitely - a stable, arbitrary horizontal offset, exactly what is measured. The 32X window
+starts 73 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so a phase error
+lands directly on the layer's horizontal position.
+
+Next: one build with (a) counters for HSYNC falling edges, resyncs actually taken, and `H_CNT`
+captured at HSYNC, to confirm resyncs are being missed and by how much; and (b) latching `LP_BASE`
+into the VDP at `H_CNT == 0x16` alongside `LINE_LEAD`, which is correct regardless and costs
+nothing. If the counters show missed resyncs, the fix is to widen or drop the `H_CNT >= 9'h160`
+guard so the 32X cannot lose horizontal lock - being a slave to the MD's HSYNC is what the real
+hardware does.
 
 **Why CD32X exposes it and cart-only 32X does not** (the user's hypothesis, and it holds up): during
 disc playback the same DDR3 port is servicing heavy frame-buffer WRITES as video is blitted in, which
