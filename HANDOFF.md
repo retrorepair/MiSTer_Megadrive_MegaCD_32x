@@ -142,6 +142,36 @@ Repeatability: three cache-on runs gave REG 8030 OK every time, and VAR TESTS wa
 in each — deterministic, not noisy. (The 26077 vs 26801 difference is between two different
 bitstreams, so treat the within-bitstream A/B, 26801 → 27945 = +4.3%, as the trustworthy figure.)
 
+### THE PASS CRITERIA, read out of mcd-verificator itself — no more guessing
+
+Disassembled with `tools/dis68k.py` from `scratch/mcd-verificator.bin`. Each test function starts
+`movem.l`/`pea <name string>`; failures do `moveq #<code>,d1` then branch to a common exit that
+prints "ERROR: <code>". The test-name strings are at 0x19612 (IRQ), 0x1961F (8030), 0x19639 (VAR),
+0x193F3 (CDC FLAGS), and each is referenced once, which locates its function.
+
+| test | where | criterion | we measure |
+|---|---|---|---|
+| **VAR TESTS err 02** | 0x0189F0 | `d1 = n - 0x5CC9; bhi if d1 > 0xE3` → **23753 ≤ n ≤ 23980** | 27945 cache on, 26801 off — **12-17% HIGH** |
+| **IRQ TEST err 06** | 0x018348 | main writes IFL2 128× with 5 NOPs between; `cmpi.w #$80` → **exactly 128** | 69 / 98 / 105 / 107 / 126 — **misses interrupts** |
+| IRQ TEST err 09 | 0x018402 | `cmpi.w #$DF` / `cmpi.w #$E2` → **224 ≤ n ≤ 226** | not reached yet |
+
+**Both remaining failures say the same thing: the sub-CPU is too slow relative to the main CPU.**
+VAR TESTS counts MAIN-CPU polls of a gate-array comm-status word across an interval the SUB-CPU
+ends, so a high count means the main CPU is fast relative to the sub. IRQ sub-test 6 needs the
+sub-CPU's INT2 handler (44-cycle exception + three instructions, ~8.6 µs at 12.5 MHz) to finish
+inside the main CPU's ~9.1 µs IFL2 loop; ours does not, so IFL2 writes merge and the count falls
+short of 128. Note the cache made VAR TESTS *worse* (26801 → 27945) because its first-order effect
+is on the MD's cartridge fetches — it speeds up the wrong side of the ratio.
+
+And the cause is already measured, in this file: **PRG-RAM /AS-to-/DTACK min 93 ns, max 335 ns,
+against a 120 ns deadline.** The sub-CPU is taking wait states that real PRG-RAM never imposes.
+
+**Change under test (build p56):** the cache's hit hold drops from 10 clk_ram (~93 ns) to 4
+(~37 ns). This is not the cache outrunning the hardware — it is the opposite; hardware gives the
+sub-CPU no wait states at all. Predictions, so the next run can falsify them cleanly: VAR TESTS
+should FALL toward 23753-23980, IRQ sub-test 6 should RISE toward 128, and REG 8030 must stay OK.
+If VAR TESTS falls but overshoots low, the remaining knob is the same one from the other side.
+
 ### What the remaining three actually are — from jgenesis, which passes all 18
 
 <https://github.com/jsgroth/jgenesis/issues/105> is the emulator author working the same test suite

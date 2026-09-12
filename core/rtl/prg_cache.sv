@@ -28,12 +28,16 @@
 //  so a line fill costs one controller slot per word and saves nothing. Hence
 //  one word per entry, direct mapped, no line.
 //
-//  WHAT THIS DELIBERATELY DOES NOT CHANGE
-//  A hit is held busy for as long as an uncontended miss takes, so the Mega CD
-//  sees the access latency it sees today. What disappears is the SDRAM slot,
-//  which is the entire point: the goal is to stop the sub-CPU stealing cycles
-//  from the MD's cartridge fetches, not to make the sub-CPU faster than the
-//  hardware it models.
+//  WHAT IT CHANGES FOR THE SUB-CPU
+//  A hit answers in ~37 ns instead of the ~93 ns best case of an SDRAM read.
+//  That is not the cache running ahead of the hardware it models - it is the
+//  opposite. Real PRG-RAM gives the sub-CPU no wait states at all, while this
+//  port measured 93 ns at best and 335 ns at worst from /AS to /DTACK against
+//  a 120 ns deadline, so the sub-CPU has been losing cycles that the hardware
+//  never loses. The verificator reads that deficit two ways: VAR TESTS counts
+//  main-CPU polls across a sub-CPU-timed interval and comes out 12-17% high,
+//  and IRQ sub-test 6 has the sub-CPU miss INT2 pulses its handler should
+//  comfortably keep up with.
 //
 //  COHERENCY - why a cache here is safe when one inside the Mega CD would not be
 //  PRG-RAM has three writers: the sub-CPU, the MD through the gate-array window
@@ -244,7 +248,17 @@ always @(posedge clk) begin
 		S_LOOK: begin
 			if (hit && !nohit) begin
 				dout_r <= q[15:0];
-				hcnt   <= 4'd8;          // S_LOOK + 9 = 10 clk_ram cycles, >= an uncontended miss
+				// A HIT ANSWERS FAST, and that is the point. Real PRG-RAM gives the sub-CPU no wait
+				// states; ours measured 93 ns at best and 335 ns at worst from /AS to /DTACK against
+				// a 120 ns deadline (telemetry beat 3), so the sub-CPU was losing cycles it should
+				// never lose. Both remaining verificator failures are that same deficit read two
+				// ways: VAR TESTS counts main-CPU polls across a sub-CPU-timed interval and reads
+				// 27945 against a pass range of 23753-23980 (mcd-verificator @0x0189F0), and IRQ
+				// sub-test 6 needs the sub-CPU's INT2 handler to keep up with 128 IFL2 pulses and
+				// it only manages 69-126 (@0x018348). Three clocks is the shortest hold the gate
+				// array can still see - clk_sys samples every second clk_ram - and dout_r is loaded
+				// on the way in, so the data is stable for the whole of it.
+				hcnt   <= 4'd2;          // S_LOOK + 3 = 4 clk_ram, ~37 ns instead of ~93 ns
 				state  <= S_HIT;
 			end
 			else begin
