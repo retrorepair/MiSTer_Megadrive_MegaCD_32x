@@ -11,9 +11,9 @@ the Mega CD streaming video into Word RAM while the 32X's two SH-2s blit it to a
 project takes the Mega CD block from one, the 32X and SH-2 blocks from the other, puts them on a single
 Mega Drive, and makes the whole thing fit in one Cyclone V.
 
-**Current release:** `releases/MegaCD_MD_MCD_32X_r39_prgcache.rbf`. Timing closes with margin, every
+**Current release:** `releases/MegaCD_MD_MCD_32X_r40_fasthit.rbf`. Timing closes with margin, every
 tier runs on real hardware, a thirteen-title sweep is clean, and
-mcd-verificator now passes 15 of 18. It is not finished — see
+mcd-verificator now passes 16 of 18. It is not finished — see
 [Status](#status) and [Known gaps](#known-gaps) for an honest account of what has and has not been
 demonstrated.
 
@@ -58,16 +58,17 @@ liveness counter advancing at every one of 24 samples and all 24 frames distinct
 3 Ninjas in gameplay with 18 of 20 frames distinct. Night Trap streams at 75.0 sectors/s with a
 13.33 ms period, against 13.333 ms on hardware.
 
-**Fit and timing** (release r39, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
+**Fit and timing** (release r40, Quartus 17.0.2 Lite, 5CSEBA6U23I7):
 
 | | |
 |---|---|
-| Logic | 33,471 / 41,910 ALMs (80%) |
+| Logic | 33,392 / 41,910 ALMs (80%) |
 | Block RAM | 539 / 553 M10K (97%) |
 | DSP | 61 / 112 (54%) |
-| clk_sys setup slack | +0.340 ns |
-| clk_ram setup slack | +0.383 ns |
-| `pll_hdmi` setup slack | +0.425 ns |
+| clk_sys setup slack | +0.407 ns |
+| clk_ram setup slack | +0.365 ns |
+| `pll_hdmi` setup slack | +0.386 ns |
+| worst hold slack | +0.155 ns |
 
 Every clock domain has positive setup and hold slack.
 
@@ -184,7 +185,7 @@ CEGen-produced 50 MHz enable, rather than upstream's 13.42 MHz which was 7.4% fa
   pixel and the pixels just in time; here both are read during the preceding HBLANK, about 10 µs early.
   This is a hardware limitation of external memory latency and is commented as such in the RTL. Only
   software racing the beam within a single line could tell.
-- **mcd-verificator completes with 3 of 18 tests failing.** See [Known gaps](#known-gaps).
+- **mcd-verificator completes with 2 of 18 tests failing.** See [Known gaps](#known-gaps).
 
 ---
 
@@ -212,7 +213,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | Port PCM wave RAM into SDRAM | **Done** — saved ~64 M10K |
 | Port the CDC `SECTOR_ACTIVE` / frame-timer fixes | **Done** |
 | Port the ASIC INT2 acknowledge fix | **Done** |
-| Re-run the verificator to get an fpgagen baseline | **Done** — 14 of 18 from r7 to r38, 15 of 18 from r39 |
+| Re-run the verificator to get an fpgagen baseline | **Done** — 14 of 18 from r7 to r38, 15 from r39, 16 from r40 |
 
 ### Phase 2 — Mega Drive + 32X
 
@@ -233,7 +234,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | `$000000` boot precedence | **Done** |
 | Shared reset across three units | **Partial** — MD and Mega CD correct; 32X `VRES_N`/`MRES_N` **stubbed** (tied inactive, as srg320 does) |
 | Mega CD PCM/CDDA and 32X PWM coexisting in the mix | **Done** — but see the audio gap below |
-| Verificator | **Partly fixed** — 3 of 18 still fail; REG 8030 closed in r39 by the PRG-RAM cache (see Known gaps) |
+| Verificator | **Mostly fixed** — 2 of 18 still fail and both are marginal; REG 8030, VAR TESTS and CDC FLAGS closed by the PRG-RAM cache (see Known gaps) |
 
 ### Phase 4 — CD32X
 
@@ -252,7 +253,7 @@ The original roadmap (in `HANDOFF.md` §6) set out six phases with GO/NO-GO gate
 | Long soak | **Partial** — longest single runs 12 minutes (Night Trap) and 10 minutes (Fusion); no multi-hour soak |
 | DDR3 telemetry technique for live state | **Done** — and it found five of the hard bugs |
 | 32X test ROMs (SH-2 timing, PWM) | **Not done** |
-| Verificator for the MD/MCD side | **15 of 18 pass** as of r39 — REG 8030 fixed by the PRG-RAM port cache, which confirmed SDRAM contention as the cause; none of these was the fpgagen cost they were assumed to be |
+| Verificator for the MD/MCD side | **16 of 18 pass** as of r40, sometimes 17 — REG 8030 and VAR TESTS fixed by the PRG-RAM port cache; none of these was the fpgagen cost they were assumed to be |
 | Audio verified by listening | **Done** — confirmed correct by ear across the tiers heard |
 | Backup RAM / SRAM save and load tested | **Not done** |
 
@@ -273,24 +274,29 @@ has no such signal.
 
 Read this before trusting the core with anything important.
 
-- **mcd-verificator completes, with 3 of 18 tests failing** — VAR TESTS 02, IRQ TEST 06 and CDC
-  FLAGS 40. REG 8030 07 **passes as of r39**. These had been written off as the fpgagen
-  cycle-accuracy cost; that was wrong. The main 68000 fetches its instructions from cartridge ROM on
-  the same SDRAM controller the Mega CD sub-CPU reads PRG-RAM from, so its bus cycles were stretched
-  by contention: the sub-CPU at 2.13M reads/s × 65 ns is 13.7% of the controller, which costs ~1.7%
-  of a 521 ns 68000 bus cycle, plus ~0.9% of refresh. r39 puts a 512-entry read cache on that port
-  (`rtl/prg_cache.sv`), which hits ~75% and gives most of those slots back. Proved by A/B on one
-  bitstream with the cache switched at the OSD: REG 8030 goes 1281 ERROR 07 → OK, VAR TESTS
-  26801 → 27945. Ruled out first, with arithmetic or on hardware: the sub-CPU clock (exactly
-  12,500,000.000 Hz), the main clock (exactly 53,693,175/7), the `prg_first` port priority, and
-  SH-2 contention. Moving PRG-RAM to DDR3 would also work and is rejected — the SDRAM is on the
-  board for deterministic latency, and DDR3 is shared with Linux, which is reading CD data during
-  exactly the workloads that matter.
-  **CDC FLAGS 40 is not a timing deficit and should not be chased as one:** it did not move at all
-  when the poll loop got faster. Per [jgenesis issue 105](https://github.com/jsgroth/jgenesis/issues/105),
-  where that emulator's author worked the same suite until all 18 passed, error 40 is the decoder
-  interrupt flag failing to clear automatically ~40% of the way through a 75 Hz frame — though this
-  core already implements that, so see `HANDOFF.md` for where that leaves it.
+- **mcd-verificator completes, with 2 of 18 tests failing** — IRQ TEST 0A and CDC FLAGS 41 — and
+  **both are marginal**: over five consecutive runs of r40 each was observed passing once, though
+  never both together. REG 8030, VAR TESTS and CDC FLAGS 40 all failed from the start of this
+  project and were written off as the price of a behavioural Mega Drive. That was wrong. The main
+  68000 fetches its instructions from cartridge ROM on the same SDRAM controller the Mega CD
+  sub-CPU reads PRG-RAM from, and the sub-CPU was additionally taking wait states that real PRG-RAM
+  never imposes — its /AS-to-/DTACK measured 93 ns at best and 335 ns at worst against a 120 ns
+  deadline. r39 added a 512-entry read cache on that port (`rtl/prg_cache.sv`, ~75% hit rate) and
+  r40 made a hit answer in ~37 ns instead of ~93 ns.
+
+  The pass criteria are not guesses; they are disassembled out of the test ROM itself
+  (`tools/dis68k.py`): VAR TESTS wants 23753-23980 (`@0x0189F0`), IRQ test 9 wants 224-226
+  (`@0x018402`, matching what jgenesis states independently), CDC FLAGS wants `48 <= d4 <= 50` and
+  `71 <= d5 <= 73` (`@0x01459A`). Measured against those, both remaining failures are about 1% of
+  count away, not a missing mechanism. See `HANDOFF.md` for exactly where each one sits and what
+  the next knob is. [jgenesis issue 105](https://github.com/jsgroth/jgenesis/issues/105), where
+  that emulator's author drove the same suite to 18 of 18, is the best external reference.
+
+  Ruled out first, with arithmetic or on hardware: the sub-CPU clock (exactly 12,500,000.000 Hz),
+  the main clock (exactly 53,693,175/7), the `prg_first` port priority, and SH-2 contention. Moving
+  PRG-RAM to DDR3 would also reduce the contention and is rejected — the SDRAM is on the board for
+  deterministic latency, and DDR3 is shared with Linux, which is reading CD data during exactly the
+  workloads that matter.
 - **Doom CD32X Fusion boots to its SELECT GAME menu**, and a ten-minute soak was clean, but **one boot in four
   ends in a black screen** (3 of 12 on r38, every reload verified; earlier builds were worse).
   The mechanism is known end to end: the game reads `numtextures` from the CD file buffer, which is the

@@ -142,6 +142,41 @@ Repeatability: three cache-on runs gave REG 8030 OK every time, and VAR TESTS wa
 in each — deterministic, not noisy. (The 26077 vs 26801 difference is between two different
 bitstreams, so treat the within-bitstream A/B, 26801 → 27945 = +4.3%, as the trustworthy figure.)
 
+### RESULT of answering hits fast: VAR TESTS and CDC FLAGS now pass too — 17 of 18
+
+The prediction held. One change (cache hit hold 10 clk_ram → 4, ~93 ns → ~37 ns):
+
+| | r38 | slow-hit cache | **fast-hit cache** |
+|---|---|---|---|
+| VAR TESTS | 26077 ERR 02 | 27945 ERR 02 | **OK** |
+| IRQ TEST | 69 ERR 06 | 105 ERR 06 | ERR 0A (past 6, 8 **and 9**) |
+| REG 8030 | 1284 ERR 07 | OK | **OK** |
+| CDC FLAGS | 47 ERR 40 | 47 ERR 40 | **OK** (70 ERR 41 on one run — see below) |
+
+Regression: eight titles clean. `g_ewj` reads FROZEN but does so on r38 as well, so it is not this
+change; `fusion` shows its known intermittent failure (`SPC=06005FCA`, the slave running zeros).
+
+### The remaining two, with their exact criteria
+
+**CDC FLAGS is marginal, not fixed.** Decoded at 0x01459A:
+```
+d4 - 0x30 <= 2   ->  48 <= d4 <= 50    else ERROR 40
+d5 - 0x47 <= 2   ->  71 <= d5 <= 73    else ERROR 41
+```
+We were at d4=47 (one low, ERROR 40); we are now inside d4 and at the very edge of d5 — one run read
+70 (ERROR 41) and the next passed. So it sits on the boundary and needs about 1% more count, not a
+new mechanism. Note the total (d4+d5) is set by how many polls fit in a 75 Hz frame, so the knob is
+either the poll rate or the frame length — and the frame is reset by `SECTOR_END` here
+(CDC.vhd:521) rather than free-running, which is the one structural difference from jgenesis.
+
+**IRQ TEST error 0A**, decoded at 0x018452: the main CPU writes IFL2 **once**, waits **6 NOPs**, and
+requires the sub-CPU's INT2 handler to have already written 2 to comm status `$26`. The sub-CPU has
+to take the exception (44 cycles) and complete one `move.w` inside roughly 7.8 µs of main-CPU time.
+This is the same "sub-CPU response latency" axis that fixed the others, now at its tightest. What is
+left to win on it is not the cache: the gate array's own `PRS_IDLE → WAIT → READ → END` sequence
+costs ~4 clk_sys (~75 ns) on every PRG-RAM access before the cache is even consulted, which is a
+large fraction of the 120 ns /DTACK deadline. That, and INT2 delivery latency, are where to look.
+
 ### THE PASS CRITERIA, read out of mcd-verificator itself — no more guessing
 
 Disassembled with `tools/dis68k.py` from `scratch/mcd-verificator.bin`. Each test function starts
