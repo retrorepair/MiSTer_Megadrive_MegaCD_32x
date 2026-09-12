@@ -1,5 +1,122 @@
 # HANDOFF / ROADMAP — Mega Drive + Mega CD + 32X on MiSTer (DE10-Nano)
 
+---
+
+# ► CURRENT STATE (session closed 2026-09-12)
+
+**Shipped:** `releases/MegaCD_MD_MCD_32X_r38_fifo_fbsel.rbf`, deployed as BOTH `MegaCD_PP` and
+`MegaCD_PQ`. Timing clean (+0.383, all clocks positive). Branch `phase18-dtack`, everything pushed.
+`/media/fat/config/MegaCD.CFG` status = `0000001020006680` (bit 24 `prg_first` = 0, as it should be).
+
+**What works:** MD carts, Mega CD discs, 32X carts and CD32X all run. 13-title sweep clean —
+Chaotix, Virtua Racing DX, Doom 32X, Doom CD32X Fusion, Night Trap, Corpse Killer, Fahrenheit,
+Slam City, 3 Ninjas, After Burner, Batman, Cobra Command, Earthworm Jim. Night Trap streams at
+75.0 sectors/s with a 13.33 ms period (hardware is 13.333). A 10-minute Fusion soak showed zero
+faults. Fusion reaches its title screen and menu, but see OPEN #1.
+
+## Fixed this session
+
+| build | fix | what it was |
+|---|---|---|
+| r24 | `phase36_cdd_idle_poll` | The gate array re-handed a LIVE CDD command to Main_MiSTer every frame, so a PLAY re-seeked ~75x/s and the file never advanced. Only poll while the command register holds IDLE. |
+| r26 | `phase28_pwm_drain` | The PWM FIFO stopped draining with the output mode off, so FULL latched, DREQ never asserted and a PWM DMA never completed — the master spun on `CHCR1` TE for ever. PicoDrive drains on elapsed cycles alone. |
+| r29 | `phase42_sdram_per_port_dout` | `sdram.sv` aliased ONE `dout` register to all five ports, so any port's read could overwrite another's before its consumer sampled it. Each port now has its own register. |
+| **r30** | **`phase43_sh_rom_handshake`** | **The big one.** The cartridge arbiter served both CPUs but only the MD checked that the SDRAM accepted its request — `RS_SH_WAIT`'s acknowledgement qualifier was commented out, so the SH-2 path advanced on a fixed ~75-93 ns timer. Cartridge-only it works by luck; with the Mega CD busy, acceptance slips past the timer and the SH-2 captures the PREVIOUS transaction's word. This was the wild jump crashing every 32X title. **Chaotix fixed.** |
+| r38 | `phase52_fifo_carries_fb` | The VDP frame-buffer write FIFO carried address/byte-enables/data but NOT the buffer select, so writes in flight when FS flipped went to the wrong buffer. Affects every 32X title. |
+
+## OPEN
+
+**1. Fusion fails to reach its menu on ~50% of boots.** Fully characterised, cause NOT found.
+
+```
+frame-buffer word @ SH-2 0x24000200 reads 0xFFFFFFFF (never written)
+  -> numtextures = (short)LITTLELONG(...) = -1     (R_InitTextures, via I_TempBuffer)
+  -> memset(ptr, 0, numtextures*20) is NEGATIVE and never terminates
+  -> all 256 KB of 32X work RAM zeroed incl. the slave's code (slave then runs zeros at 06005FCA)
+```
+
+Discriminator is perfect over 10 boots: failing -> FB0 `FFFFFFFF`, working -> `00000000`.
+Caller found by hardware probe at `0202051A`/`02020546`; literals resolve to `"T_START"`
+(0x0202C40C), `"T_END"` (0x0202C404), `W_GetNumForName` (0x02018EF4), `numtextures` (0x06006BDE),
+`memset` (0x0201FD18). **Next step: find why that word is unwritten — NOT another fix attempt.**
+
+**2. mcd-verificator: 4 failures, ONE cause, and it is NOT fpgagen.** VAR TESTS 02, IRQ TEST 09,
+REG 8030 07, CDC FLAGS 40. The MD's cartridge instruction fetches stall on an SDRAM controller
+shared with Mega CD PRG-RAM: sub-CPU at 2.13M reads/s x 65 ns = 13.7% controller occupancy, ~1.7%
+of a 521 ns 68000 bus cycle, plus ~0.9% refresh = ~2.6%, against the 2.59% speed-up CDC FLAGS needs.
+**Recommended fix: a small cache on the PRG-RAM port, keeping it on fast SDRAM** (see DEAD ENDS for
+why NOT to relocate it). Working set is ~50 words, so temporal locality alone suffices; `sdram.sv`
+has no burst support so a line fill would cost the same slots. The real work is invalidation from
+all three writers: sub-CPU, MD gate-array window ($420000 in mode 1), CDC DMA.
+
+**3. r31 (`phase44_cart_strobe_leak`) is built and tested but NOT promoted.** Closes a genuine race
+— the 68000's raw cartridge strobes reach the cart between arbiter grants, so `rd0` can already be
+high when the SH-2 is granted and its request never produces a rising edge. Measures equal to r30
+(8/8 boots), so there is no measured reason to displace the soaked build.
+`releases/MegaCD_MD_MCD_32X_r31_strobeleak.rbf`.
+
+**4. `UPSTREAM_BUGS.md`** documents six defects for reporting upstream. Attribution is flagged
+UNCONFIRMED: srg320's published `S32X_MiSTer` repo does not ship the 32X interface RTL, so it could
+not be diffed. Check against your own import source before filing.
+
+**5. 32X horizontal offset** — parked by user instruction, untouched.
+
+## DEAD ENDS — do not re-walk these
+
+- **Missing `SH_SYSREG_WAIT`** (IF.sv:158/504/640/1089, all commented out). Looks exactly like the
+  r30 bug. DISPROVED in ModelSim on the real `BSC.sv`: `CE_F`/`CE_R` strictly alternate, `BS_N` is
+  low exactly one phi cycle, and the BSC samples `DI` one CE edge AFTER `SH_REG_DO` loads, even at
+  zero wait states. **Do not "restore" those lines.**
+- **Frame-buffer clear too slow to survive an FS flip.** DISPROVED by experiment: 2.3x faster FB
+  writes (`FIFO_FB_WAIT` 5->1) did not move the failure rate (5/12 vs 8/12). Reverted; it also cost
+  `pll_hdmi` timing.
+- **Frame-select bank mismatch between write and read-back.** DISPROVED by measuring FS at both
+  accesses: every FAILING boot had `FS@write == FS@read`; the only mismatches SUCCEEDED.
+- **`prg_first` for the verificator.** DISPROVED by hardware A/B (it is OSD bit 24, settable in
+  `MegaCD.CFG`, no rebuild needed). No effect on any of the four tests.
+- **Sub-CPU or main CPU clock rate.** Both EXACT. `CEGen` is an integer accumulator and
+  `2,147,727 x 25 = 53,693,175`, giving 12,500,000.000 Hz; the MD is exactly `53,693,175/7`.
+  REG 8030 measures the sub-CPU timer against the main clock and reads 0.31% LOW — a slow sub-CPU
+  would read HIGH.
+- **SH-2 contention during the verificator.** Both SH-2 PCs read `00000000` (no 32X header, adapter
+  disabled). They steal no cartridge slots.
+- **Moving Mega CD PRG-RAM to DDR3.** Rejected: SDRAM is on the board for low DETERMINISTIC latency;
+  DDR3 is behind the HPS bridge and shared with Linux/Main_MiSTer, which is reading CD data during
+  exactly the workloads that matter. The 32X work RAM lives there only because a line cache hides it.
+- **r28: per-port `dout` capturing `SDRAM_DQ` into five enabled registers directly.** Compiles clean
+  (+0.084) and the core comes up DEAD — both SH-2s at PC 0, zero `$A151xx` accesses. The `SDRAM_DQ`
+  input path is tight and fanning it out breaks the capture. r29 keeps ONE capture register and
+  splits per port one cycle later, inside the 3-cycle busy window.
+
+## Traps that cost time this session
+
+- **The jump trail is not a proxy for "it works".** An 8/8 clean jump-trail result sat alongside a
+  ~50% black-screen rate. **Screenshot the screen.** `scratch/menutest.py` is the honest test.
+- **Counters that look like perfect discriminators but are consequences of hanging early:** the FS
+  toggle count (161 failing vs ~864 working) and the write count to FB word 0x100 (132 vs saturated
+  255). The game hangs at a fixed point in a deterministic path, so the same numbers recur.
+- **Never condemn a build on one sample.** One sweep sample showed garbage PCs and a black screen on
+  r31; eleven subsequent boots were clean. The sweep's fixed 24 s sample sometimes lands on a slow load.
+- **Main_MiSTer re-execs on core load**, so a `/proc/<pid>/mem` reader started beforehand dies silently.
+- **`cdd` state persists across core loads** unless the core requests a reset (`data_in[0] == 0xFF`).
+- **Loading an MGL cold from the menu races its own `delay=` fields** and often leaves the 32X
+  unstarted. Load the core first, then the game.
+- **32X work RAM byte order:** the SH-2 word at address A is at DDR3 offset `(A - base) XOR 2`, and a
+  32-bit value reads back as a plain little-endian load. Getting this wrong makes the stack look empty.
+
+## Tooling built this session (all reusable)
+
+`scratch/menutest.py` screen-based boot-success rate · `scratch/sweep30.py` multi-title health sweep
+· `scratch/cddpeek.py` / `cddfull.py` / `cddlog.py` read Main_MiSTer's live CD state out of the
+stripped binary · `scratch/subhist.py` / `mdhist.py` / `mpchist.py` address-bus histograms ·
+`scratch/shframe.py` SH-2 stack/work-RAM reader · `scratch/fbcheck2.py` / `fbmap.py` frame-buffer
+content maps · `scratch/stall.py` catch the instant a CD read stalls · `tools/mif2bin.py` +
+`dis_sh2.py` disassemble the 32X BIOS · `tools/phase41/45/47/49/51` hardware PC-trail probes.
+
+---
+
+# Historical log (newest sections at the end)
+
 Written 2026-09-08, at the end of the NukedMD-MegaCD release work, by the agent that did that work.
 This is a roadmap for a NEW core: a single MiSTer core that is a Mega Drive with a **32X in the
 cartridge slot** and a **Mega CD on the expansion port** — the real "Sega CD 32X" stack — running all
