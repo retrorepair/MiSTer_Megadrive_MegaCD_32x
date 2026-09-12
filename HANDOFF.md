@@ -45,6 +45,30 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
+**0. Night Trap's 32X horizontal offset — reframed, with a captured frame.**
+The symptom is NOT a shift. Captured at `scratch/shots/nt4.png`: the intro animation fills the LEFT
+~45% of the screen and the right ~55% is black. A line that ENDS EARLY, not one that starts in the
+wrong place — which rules out genlock/H-counter errors, since those would displace the whole image
+rigidly and leave no black margin.
+
+That points at the 32X VDP's **run-length mode** decoder rather than the display timing: in RLE mode
+each line is decoded until 320 pixels are filled, so a run terminating early leaves content packed
+left with black to the right. An RLE stream resynchronising differently between runs would also
+explain the occasional "way right" variant the user reports.
+
+Supporting measurement, four runs: the frame-buffer line table reads a uniform `0x0100` for every
+line in BOTH buffers. In packed-pixel mode that would be nonsense (all lines pointing at the same
+pixel data); in run-length mode the entries are pointers into an RLE stream, where a flat table is
+plausible. Caveat: the 30 s sample point was not reliably inside the video and at least one of the
+four dumps was of a blank screen, so treat the table reading as indicative, not established.
+
+Next steps, in order: (1) read `BMMR`/`PPCR` live to confirm which bitmap mode Night Trap is in
+during the intro — the VDP debug word already carries `MODE`; (2) if RLE, review VDP.sv's run-length
+line decoder for early termination and for what it does at a line boundary; (3) only then look at
+timing. Sample at ~12-15 s, not 30 s, and verify the screenshot is not blank before trusting a dump.
+
+
+
 **1. Fusion fails to reach its menu on ~50% of boots.** Fully characterised, cause NOT found.
 
 ```
