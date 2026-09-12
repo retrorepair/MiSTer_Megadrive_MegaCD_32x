@@ -156,6 +156,43 @@ The prediction held. One change (cache hit hold 10 clk_ram → 4, ~93 ns → ~37
 Regression: eight titles clean. `g_ewj` reads FROZEN but does so on r38 as well, so it is not this
 change; `fusion` shows its known intermittent failure (`SPC=06005FCA`, the slave running zeros).
 
+### ROOT CAUSE of the last two failures: PRG-RAM WRITES are not posted
+
+Both survivors have one cause, and it is the half of the latency problem today's cache did not
+touch. **The sub-CPU is not acknowledged until the SDRAM has completed a PRG-RAM write. Real
+PRG-RAM posts writes — the CPU is acknowledged at once and never waits.**
+
+Why that lands on exactly these two tests, and on nothing else:
+
+- **IRQ TEST 0A** (0x018452) — the main CPU writes IFL2 once, waits 6 NOPs, and requires the
+  sub-CPU's INT2 handler to have *already* written 2 to comm status. Before the handler's first
+  instruction executes, the 68000 exception **pushes three words onto the stack, and the stack is in
+  PRG-RAM**. Three writes, each waiting on the SDRAM, sit on the critical path of a test whose whole
+  budget is ~6.8 µs of main-CPU time against ~5.1 µs of sub-CPU work.
+- **CDC FLAGS 41** (0x014568) — d4 and d5 do NOT count a tight poll loop, which is what this file
+  assumed for two sessions. Each iteration is `jsr (a1)` + `jsr (a2)`: two main↔sub **RPC round
+  trips**, and each round trip is bounded by the sub-CPU's handler, which writes its reply. More
+  counts per DECI phase therefore means a faster sub-CPU, not a faster main CPU — which is also why
+  the count never moved when the main CPU got faster, and why d4 moved from 47 into 48-50 the moment
+  sub-CPU *read* latency dropped.
+
+**The fix already exists in the tree, conflated with an unsafe change.** `DBG_EARLY_DTACK` (OSD bit
+28) does two separate things:
+
+| | what it does | safe? |
+|---|---|---|
+| ASIC.vhd:1584, PRS_IDLE | posts **writes** — acks the CPU at issue | **YES.** Address and data are latched at that point; PRSS still runs PRS_WAIT → PRS_WRITE → PRS_END holding them, and PRS_IDLE cannot issue again until `PRG_RDY`. Nothing can be lost. |
+| ASIC.vhd:1609, PRS_WAIT | acks **reads** when the controller merely *accepts* them | **NO.** Measured on r10: 0.011-0.068% of reads would return stale data — 250 to 1500 silently wrong words per second. |
+
+The earlier session measured the pair together, correctly saw the read hazard, and rejected the whole
+switch — never separating the half that is both safe and faithful. **Split the bit: post writes,
+leave reads acknowledged on data.** That is what the hardware does.
+
+Note also that the earlier arithmetic ("1.38% of reads × 2 clocks ≈ 0.48% of sub-CPU time, well
+short of what is needed") was measured while the cartridge port was still stealing the controller;
+it concluded latency was a minor term. Today's results contradict it — removing read latency alone
+moved VAR TESTS, REG 8030, IRQ 6→0A and CDC d4 47→48. Latency was the axis all along.
+
 ### The remaining two, with their exact criteria
 
 **CDC FLAGS is marginal, not fixed.** Decoded at 0x01459A:
