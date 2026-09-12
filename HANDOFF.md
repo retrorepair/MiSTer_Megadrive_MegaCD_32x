@@ -184,6 +184,40 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41: EVERY path in the loop measured. No wait-state defect exists.
+
+Stepping back to the reference exposed the blind spot: **jgenesis closed its timing trio by modelling
+MAIN-CPU behaviour** (refresh, "2 stall cycles in every 172 mclk"), while every probe built here had
+been on the sub-CPU side. So the main side was measured too. Complete table, all on hardware during
+a verificator run:
+
+| path | probe | result |
+|---|---|---|
+| sub-CPU PRG-RAM reads | phase18 (in build) | 2.41 M/s, **0.00%** over deadline |
+| sub-CPU CDC register ports | phase60 | min 0, **max 5** clk_sys, 0 slow |
+| sub-CPU, EVERY access | phase61 | 2.887 M/s, no slow cycles in steady state |
+| sub-CPU $FF80xx mailbox | phase61 | min 0, **max 5**, 0 slow |
+| MAIN CPU -> gate array | phase62 | min 0, **max 0** clk_sys, 0 slow |
+| MAIN CPU -> cartridge ROM | phase63 | 1.52 M/s, min 2, **0.00%** over deadline |
+
+**Nothing waits on anything.** And the shape of the loop is now known from the numbers rather than
+assumed: the sub-CPU answers inside one 2.08 µs poll, yet an RPC costs ~55 µs ≈ 420 main-CPU clocks,
+which is simply the main CPU executing the stub at 0x00D4EE / 0x00D52C. **The count is main-CPU
+execution bound.**
+
+That is what makes the remaining 2.5% hard to call a defect. Real hardware loses ~1.16% of the main
+CPU to DRAM refresh, which we do not model at all - so ours should be FASTER than hardware and return
+MORE counts. It returns fewer. Adding jgenesis's refresh stall would move it the wrong way.
+
+**The one thing still unmeasured** is not latency but occupancy: the gap BETWEEN main-CPU bus cycles.
+A probe measures /AS to /DTACK; it cannot see the 68000 being held off from starting a cycle at all.
+If something delays /AS - arbitration, a refresh window, the 32X cartridge arbiter - it costs time
+that every probe here is blind to. That is the next instrument: count clk_sys from /DTACK of one MD
+cycle to /AS of the next, histogrammed, and compare against the 68000's own minimum.
+
+**Four builds of probes have now failed to find a defect. Treat "our 68000 timing is wrong" as
+unproven, and do not close this test by adjusting a constant.**
+
 ### CDC FLAGS 41: measured exhaustively. There is NO wait-state defect left to fix.
 
 `tools/phase61_all_sub_latency.py` stops targeting and arms on EVERY sub-CPU /AS, with a second
