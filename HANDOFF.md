@@ -155,11 +155,18 @@ what the last three are:
   refresh as a stall of 2 in every 172 mclk cycles** (~1.16%). Our core has real SDRAM contention
   instead of a model, and it was overshooting — which is why *reducing* it fixed 8030 here while he
   had to *add* delay there. Same target from opposite sides.
-- **CDC FLAGS error 40 is not a timing deficit at all.** jgenesis: *"the decoder interrupt flag
-  should automatically clear about 40% of the way through a 75Hz frame."* That is our exact error
-  code, it is a concrete implementable behaviour in the CDC, and it explains why the count sat at 47
-  no matter how fast the CPU polled. **The "poll must run 2.59% faster" theory in the section below
-  is superseded — do not spend more time on it.**
+- **CDC FLAGS error 40 is not a timing deficit** — jgenesis: *"the decoder interrupt flag should
+  automatically clear about 40% of the way through a 75Hz frame."* That is our exact error code, and
+  it explains why the count sat at 47 however fast the CPU polled. **The "poll must run 2.59%
+  faster" theory in the section below is superseded — do not spend more time on it.**
+  **BUT: we already do this.** CDC.vhd:509 sets `FRAME_MID = 286363` against `FRAME_END = 715908`,
+  which is 40.00%, and CDC.vhd:396 releases `IFSTAT(DECI)` on `DEC_MID`. So error 40 here is NOT the
+  missing behaviour jgenesis was missing; ours is present and the test still objects. Start by
+  finding out what the test actually measures at that point rather than assuming, and note that the
+  frame timer is RESET by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it as free-running —
+  if the test runs with a disc streaming, our 40% point is 40% of the *drive's* sector period, not
+  of a free-running 75 Hz frame. That difference is small (Night Trap measures 13.33 ms against
+  13.3333) but it is the one structural difference between the two implementations at this test.
 - Neighbouring CDC flag sub-tests, for when 40 is fixed and the next one appears: 22 = the transfer
   end interrupt fires when one word is left for the CPU to read, not after it reads the last one;
   26 = a transfer-end INT5 must not fire while the previous one is unacknowledged; 34/35 = decoder
