@@ -26,3 +26,29 @@ __pycache__/
 **/docs/*.pdf
 SH/test/
 scratch/
+
+# Hardware-test output. Every one of these directories is a dump of screenshots or captures
+# pulled back off the MiSTer by the scripts in tools/mister and scratch; none of it is source,
+# and it was making the repository look like a spoil heap. Keep it locally, out of git.
+/a3test/
+/abtest/
+/anim/
+/anim2/
+/biosdiff/
+/biosseq/
+/burst/
+/cd32x/
+/cdx6/
+/cmp/
+/cmp6/
+/diag/
+/fusion/
+/ovtest/
+/palnt/
+/r4test/
+/r6burst/
+/r7test/
+/soak_*/
+/sweep_*/
+/vdptest/
+/verif3/

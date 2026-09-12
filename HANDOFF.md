@@ -2,11 +2,28 @@
 
 ---
 
-# ► CURRENT STATE (session closed 2026-09-12)
+# ► CURRENT STATE (session closed 2026-09-12, second session)
 
-**Shipped:** `releases/MegaCD_MD_MCD_32X_r38_fifo_fbsel.rbf`, deployed as BOTH `MegaCD_PP` and
-`MegaCD_PQ`. Timing clean (+0.383, all clocks positive). Branch `phase18-dtack`, everything pushed.
+**Released:** r38 is published as a downloadable bitstream at
+<https://github.com/retrorepair/MiSTer_Megadrive_MegaCD_32x/releases/tag/r38> (the `.rbf` is a release
+asset; `*.rbf` is gitignored so it is not in the tree). `main` is fast-forwarded to `phase18-dtack`,
+tagged `r38`, and pushed. **Verified:** the core running on the MiSTer as `MegaCD_PQ`/`MegaCD_PP`, the
+file in `releases/`, and `core/output_files/MegaCD.rbf` are all md5 `c819f5cdb4a0cb6bcea946486ddd2307`
+— one and the same build. Timing clean (+0.383, all clocks positive).
 `/media/fat/config/MegaCD.CFG` status = `0000001020006680` (bit 24 `prg_first` = 0, as it should be).
+
+## ►► READ THIS BEFORE TRUSTING ANY BOOT-RATE NUMBER IN THIS FILE
+
+Every screenshot-based boot harness written before today built the MGL path as
+`_Console/<tag>_fusion.mgl`. The real name is `_Console/MegaCD_<tag>_fusion.mgl`. **MiSTer silently
+ignores a `load_core` naming a file that does not exist**, so the core kept running and the harness
+screenshotted the *previous* boot. Twelve "clean boots" were one boot photographed twelve times, and
+`scratch/sweep30.py`, `scratch/menutest.py` and `scratch/fbcheck2.py` all have the same shape — any
+result from them where every title looks identical is suspect.
+
+Use `tools/mister/boottest.py`: it exits if the MGL is missing, waits for MiSTer's pid to change before
+it starts timing, and retries a load that did not take. Also note a real Fusion boot takes **~50 s**
+(the intro video runs to ~30 s and the load finishes ~38 s); a 25 s window classifies mid-intro.
 
 **What works:** MD carts, Mega CD discs, 32X carts and CD32X all run. 13-title sweep clean —
 Chaotix, Virtua Racing DX, Doom 32X, Doom CD32X Fusion, Night Trap, Corpse Killer, Fahrenheit,
