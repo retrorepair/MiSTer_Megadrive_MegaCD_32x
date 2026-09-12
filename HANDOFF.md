@@ -156,6 +156,34 @@ The prediction held. One change (cache hit hold 10 clk_ram → 4, ~93 ns → ~37
 Regression: eight titles clean. `g_ewj` reads FROZEN but does so on r38 as well, so it is not this
 change; `fusion` shows its known intermittent failure (`SPC=06005FCA`, the slave running zeros).
 
+### CONFIRMED and FIXED: posting writes closes IRQ TEST. 17 of 18.
+
+r41 splits `DBG_EARLY_DTACK` in two (tools/phase57_post_prg_writes.py): `PRG_POST_WR` posts writes
+(default ON), the unsafe early READ acknowledge stays on bit 28 and stays off. The prediction held
+exactly — **IRQ TEST now passes**, repeatably: three runs, byte-identical result pages.
+
+| | r38 | r39 cache | r40 fast hit | **r41 posted writes** |
+|---|---|---|---|---|
+| VAR TESTS | 26077 ERR 02 | 27945 ERR 02 | OK | **OK** |
+| IRQ TEST | 69 ERR 06 | 105 ERR 06 | ERR 0A | **OK** |
+| REG 8030 | 1284 ERR 07 | OK | OK | **OK** |
+| CDC FLAGS | 47 ERR 40 | 47 ERR 40 | OK on 1 of 5 | 70 ERR 41 |
+
+A second hazard had to be handled and is worth remembering: PRS_WRITE acknowledged unconditionally,
+so a posted write - whose CPU cycle has usually already ended, with the strobe-follow logic having
+released /DTACK - would assert /DTACK again inside the CPU's NEXT bus cycle and terminate it early.
+That is the "build 21 BIOS corruption" this file's own comment warns about, and it is very likely
+part of why the old combined switch looked so destructive. `PRG_WR_POSTED` suppresses the second ack.
+
+Regression: ten titles clean, including Slam City. Fit 33,381 ALMs, block RAM unchanged, worst setup
++0.132 ns (pll_hdmi), every domain positive.
+
+**What is left: CDC FLAGS 41 only, and it is ONE COUNT.** `71 <= d5 <= 73` is required and we read
+70. d4 is inside its window. d5 counts main<->sub RPC round trips during the second DECI phase, so
+the knob is either slightly more sub-CPU speed or a slightly longer frame - and the frame here is
+reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
+structural difference at this test.
+
 ### ROOT CAUSE of the last two failures: PRG-RAM WRITES are not posted
 
 Both survivors have one cause, and it is the half of the latency problem today's cache did not
