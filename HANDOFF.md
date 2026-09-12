@@ -45,29 +45,37 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
-**0. Night Trap's 32X horizontal offset — reframed, with a captured frame.**
-The symptom is NOT a shift. Captured at `scratch/shots/nt4.png`: the intro animation fills the LEFT
-~45% of the screen and the right ~55% is black. A line that ENDS EARLY, not one that starts in the
-wrong place — which rules out genlock/H-counter errors, since those would displace the whole image
-rigidly and leave no black margin.
+**0. Night Trap's horizontal offset: the DISPLAY IS INNOCENT. The image arrives narrow.**
 
-That points at the 32X VDP's **run-length mode** decoder rather than the display timing: in RLE mode
-each line is decoded until 320 pixels are filled, so a run terminating early leaves content packed
-left with black to the right. An RLE stream resynchronising differently between runs would also
-explain the occasional "way right" variant the user reports.
+Measured against the displayed buffer (FS read live from beat 12), sampling at 12/16/20 s with the
+screenshot size checked so blank frames are discarded:
 
-Supporting measurement, four runs: the frame-buffer line table reads a uniform `0x0100` for every
-line in BOTH buffers. In packed-pixel mode that would be nonsense (all lines pointing at the same
-pixel data); in run-length mode the entries are pointers into an RLE stream, where a flat table is
-plausible. Caveat: the 30 s sample point was not reliably inside the video and at least one of the
-four dumps was of a blank screen, so treat the table reading as indicative, not established.
+```
+t=12s  FS=0  LT[50,100,150] = 0x0CD8, 0x2C18, 0x4B58   stride exactly 160 words = 320 px
+              line100 data ends at word 120 of 160  (242 of 320 px)
+t=20s  FS=0  LT ramp again                              line100 ends at word 111 (224 of 320 px)
+```
 
-Next steps, in order: (1) read `BMMR`/`PPCR` live to confirm which bitmap mode Night Trap is in
-during the intro — the VDP debug word already carries `MODE`; (2) if RLE, review VDP.sv's run-length
-line decoder for early termination and for what it does at a line boundary; (3) only then look at
-timing. Sample at ~12-15 s, not 30 s, and verify the screenshot is not blank before trusting a dump.
+Three things follow, and they eliminate every hypothesis previously entertained here:
 
+1. **The line table is correct.** A clean ramp, stride exactly 160 words = 320 pixels. It maps screen
+   line N to buffer row N-31 consistently, which is the game placing the video vertically, not a bug.
+   (The earlier "uniform 0x0100" reading was sampled on blank frames - lines 0-2 and 200+ genuinely
+   hold 0x100, the ramp covers the video's rows.)
+2. **The display shows what the buffer holds.** Content ends on screen at roughly the same x where
+   the buffer's data ends. So this is NOT genlock, NOT the H counter, NOT the line-table base, and
+   NOT the run-length decoder - the theory in the previous revision of this section was wrong.
+3. **The buffer line is genuinely blank past ~224-242 px** - every word from ~112 to 159 reads zero.
+   The right quarter to third of EVERY line is never written.
 
+**So the fault is upstream of the 32X VDP, in the path that writes video into the frame buffer**
+(Mega CD -> 32X FB). Night Trap streams disc video and something is writing short lines.
+
+Next step: `tools/phase55_fbwrite_probe.py` already exists and records frame-buffer write addresses;
+point it at the X extent instead - capture min and max `FIFO_FB_A[7:1]` (the word offset within a
+line) per frame, plus a count of writes per line. If the writes stop at ~112 words the write loop or
+its length is short; if they cover 160 words but land at wrong addresses, it is the destination
+stride. Also worth checking whether the source is 256 px wide and expected to be centred.
 
 **1. Fusion fails to reach its menu on ~50% of boots.** Fully characterised, cause NOT found.
 
