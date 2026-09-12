@@ -184,6 +184,48 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41: NOT marginal any more, and the round trip is fully mapped
+
+"A different value each build" was a symptom of something already fixed, not of a live timing
+relationship. Grouping result pages by md5 over five runs of ONE bitstream:
+
+| build | 5 runs | outcome |
+|---|---|---|
+| r40 (fast hits, writes still waiting) | **3 distinct pages** | IRQ passed once, CDC passed once, never together |
+| r42 (posted writes) | **1 page, 5 of 5** | IRQ OK, CDC 70 ERR 41, byte-identical every time |
+
+Posting writes removed the jitter, and that makes sense: before it, every sub-CPU write either made
+the 120 ns /DTACK deadline or did not, depending on where the SDRAM controller happened to be in its
+contention cycle — a genuine phase relationship. With writes posted the sub-CPU never waits on the
+controller, so the phase dependence is gone. What is left is **systematic**: d4 = 48, d5 = 70, total
+118 against a needed ~120. About 1.7%, every single run.
+
+**What one count actually is.** The loop body at 0x014568 is two RPCs, and the main CPU cannot touch
+$FF80xx at all — those are sub-CPU addresses — so each one is a mailbox round trip. The write
+primitive is at 0x00D4EE:
+
+```
+00D4F8  move.w (a0),d0        ; a0 -> gate-array comm status
+00D4FA  bne.b  $d4f8          ; spin until the sub-CPU is idle
+00D502  move.l $4(a7),(a1)    ; hand over the target address
+00D50C  move.b d1,(a0)        ; and the data byte
+00D514  bne.b  $d514          ; spin again
+00D51E  move.w #$2,(a1)       ; command = 2, "do the write"
+00D522  move.w (a0),d0
+00D524  beq.b  $d522          ; SPIN until the sub-CPU acknowledges
+```
+
+and the read primitive at 0x00D52C is the same shape. So `d4 + d5` measures the **main<->sub mailbox
+round trip**, twice per count, and its floor is how quickly the sub-CPU's BIOS notices a command in
+its own polling loop — roughly 56 µs per RPC here.
+
+That is why everything done today moved it by exactly one count: cache, fast hits and posted writes
+all attack sub-CPU *memory* latency, and the round trip is dominated by the mailbox handshake
+instead. **The remaining lever is gate-array comm-register access latency, from both sides** — the
+main CPU's spin on $A1202x and the sub-CPU's poll of $FF801x. Nothing in this project has measured
+those yet. Note VAR TESTS (main-CPU polls of a gate-array register against a sub-timed interval) now
+PASSES, which bounds how wrong the main side can be, so suspect the sub-CPU's side first.
+
 ### CDC FLAGS 41: the decoder waveform is NOT the cause. Both numbers are now known.
 
 Forcing the d4 branch to report (`tools/dis68k.py` located it; patch BHI.W -> BRA.W at 0x0145A4,
