@@ -233,7 +233,7 @@ localparam CONF_STR = {
 	"H2O[62],MCD RAM,Banks 2&3,Banks 0&1;",
 	"H2O[2],SH2 Clock,23.0MHz,26.8MHz;",
 	"H2O[39],MCD /AS,68000,Bus;",
-	"H2O[36],MCD PRG cache,Off,On;",
+	"H2O[36],MCD PRG cache,On,Off;",
 	"H2O[38],PRG cache hits,On,Off;",
 	"H2O[28],MCD PRG DTACK,Data,Early;",
 	"H2O[24],MCD PRG Priority,Normal,Above Cart;",
@@ -1307,7 +1307,7 @@ prg_cache #(.IDX(9)) prg_cache
 (
 	.clk(clk_ram),
 	.reset(reset),
-	.en(status[36]),        // OSD: off = pure pass-through, i.e. the core exactly as it was
+	.en(~status[36]),       // OSD, sense inverted so the DEFAULT (0) is cache ON; 1 = pure pass-through
 	.nohit(status[38]),     // OSD: run the wrapper but never serve a read from the cache
 
 	.a({(MCD_BANK23 ? 6'b100000 : 6'b011111),MCD_PRG_ADDR}),

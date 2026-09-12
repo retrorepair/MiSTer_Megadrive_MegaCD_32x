@@ -118,24 +118,93 @@ and no other SDRAM port addresses the region (port 0 cartridge 0000000-0EFFFFF, 
 0F00000-0F1FFFF, port 3 PCM 1080000-108FFFF, port 4 load/save). So a cache at the port sees every
 write and invalidation is automatic.
 
-### The model is CONFIRMED. First build, on hardware:
+### RESULT: REG 8030 now PASSES. 15 of 18, up from 14.
 
-| | r38 baseline | + PRG-RAM cache (build 1) |
-|---|---|---|
-| VAR TESTS | 26077 ERR 02 | **27945** ERR 02 |
-| IRQ TEST | 69 ERR 06 | 4 ERR 06 |
-| REG 8030 | 1284 ERR 07 | — hung before it |
-| CDC FLAGS | 47 ERR 40 | — hung before it |
+A/B on ONE bitstream, the cache switched at the OSD (bit 36), so nothing else differs:
 
-**VAR TESTS +7.2%.** The main CPU's loop really was being held back by SDRAM contention with the
-sub-CPU, and removing most of that traffic really does speed it up — comfortably more than the 2.59%
-CDC FLAGS needs. Everything else about the 4-failure diagnosis stands.
+| | r38 (`MegaCD_PQ`) | same build, cache OFF | same build, cache ON |
+|---|---|---|---|
+| VAR TESTS | 26077 ERR 02 | 26801 ERR 02 | 27945 ERR 02 |
+| IRQ TEST | 69 ERR 06 | 126 ERR 06 | 98 ERR 06 |
+| **REG 8030** | 1284 ERR 07 | 1281 ERR 07 | **OK** |
+| CDC FLAGS | 47 ERR 40 | 47 ERR 40 | 47 ERR 40 |
 
-(Take the baseline from this table, not from the older text: measured the same day, same disc, same
-procedure. The historical "IRQ TEST 227 ERROR 09" is from an earlier setup and is not comparable.)
+REG 8030 is a binary result and it flips with the switch: the cache is the cause, proven on the same
+bitstream. The counts are noisier than they look — VAR TESTS measured 26077 and 26801 on two runs of
+the *same* configuration, a ~2.8% spread, so read the cache's effect on it as "+4 to 7%", not a
+precise figure. IRQ TEST (69 / 126 / 98) is noisier still and should not be read as a trend at all.
 
-Build 1 then **hung at REG X000**, and the three defects behind it are all the same family this
-project keeps meeting — an acknowledge given before the data or the request is safe:
+**CDC FLAGS did not move — at all, 47 in every configuration.** The model said it needed the poll
+loop ~2.59% faster; the loop *is* faster now and the count is identical, so CDC FLAGS is NOT limited
+by main-CPU speed. Confirmed independently below.
+
+Repeatability: three cache-on runs gave REG 8030 OK every time, and VAR TESTS was **exactly** 27945
+in each — deterministic, not noisy. (The 26077 vs 26801 difference is between two different
+bitstreams, so treat the within-bitstream A/B, 26801 → 27945 = +4.3%, as the trustworthy figure.)
+
+### What the remaining three actually are — from jgenesis, which passes all 18
+
+<https://github.com/jsgroth/jgenesis/issues/105> is the emulator author working the same test suite
+until every test passed, with a note per failure. It is the best reference we have and it changes
+what the last three are:
+
+- **Expected values, stated by the test author's analysis: IRQ test 224-226, REG 8030 1286-1288.**
+  Ours now passes 8030, so we are inside 1286-1288.
+- **VAR 02 / IRQ 09 / REG 8030 07 are all one timing relationship** — in jgenesis the main 68000 ran
+  slightly *fast* relative to the Sega CD; all three passed when he modelled main-CPU **memory
+  refresh as a stall of 2 in every 172 mclk cycles** (~1.16%). Our core has real SDRAM contention
+  instead of a model, and it was overshooting — which is why *reducing* it fixed 8030 here while he
+  had to *add* delay there. Same target from opposite sides.
+- **CDC FLAGS error 40 is not a timing deficit at all.** jgenesis: *"the decoder interrupt flag
+  should automatically clear about 40% of the way through a 75Hz frame."* That is our exact error
+  code, it is a concrete implementable behaviour in the CDC, and it explains why the count sat at 47
+  no matter how fast the CPU polled. **The "poll must run 2.59% faster" theory in the section below
+  is superseded — do not spend more time on it.**
+- Neighbouring CDC flag sub-tests, for when 40 is fixed and the next one appears: 22 = the transfer
+  end interrupt fires when one word is left for the CPU to read, not after it reads the last one;
+  26 = a transfer-end INT5 must not fire while the previous one is unacknowledged; 34/35 = decoder
+  and transfer-end interrupts must not trigger INT5 while the other is pending unacknowledged;
+  44 = the decoder flag must appear in IFSTAT even when decoder interrupts are disabled.
+- **Our IRQ TEST now errors at 06 and reads 69-126; this file's history records 227 ERROR 09.**
+  Different sub-test, so the numbers are not comparable — but something moved our IRQ failure
+  EARLIER at some point, and nobody has looked at when. Worth bisecting before chasing 09.
+
+(Take baselines from this table, not from the older text: same day, same disc, same procedure. The
+historical "IRQ TEST 227 ERROR 09" is from an earlier setup and is not comparable.)
+
+**Regression: clean.** Nine titles through `tools/mister/sweeptest.py` with the cache on — chaotix,
+vrdx, doom, cd_nighttrap, ninjas, g_cobra, m_afterburner, cd_corpse, fusion — all with the 68000
+running, no wild jump on either SH-2, CD streaming at 60-75 sectors/s and the picture changing.
+
+### ROOT CAUSE of the two broken builds, found in ModelSim in six seconds
+
+Builds 1 and 2 were guesses and both were wrong. `tools/sim/tb_prg_cache.sv` models sdram.sv's port 2
+and ASIC.vhd's PRSS faithfully and drives a random read/write stream against a reference memory; it
+reproduced both hardware failures immediately and named a third. **The rule is one sentence: `busy`
+must never fall until the module is idle — and it fell twice.**
+
+- After a **write**, the SDRAM's own busy dropped while `S_WR` was still finishing. ASIC.vhd reads
+  that as "access over", goes PRS_END → PRS_IDLE and raises the strobes for the next access while the
+  cache is still occupied; `S_IDLE` then never sees the edge, the request is lost, and the sub-CPU
+  waits for a /DTACK that never comes. That is precisely the hardware signature — `subA` frozen with
+  `AS_N=0`, `DTACK_N=1`, bus-cycle counter stopped, rest of the core alive.
+- On a **miss**, `busy` was `(state==S_HIT)|s_busy`; at the moment the SDRAM finished, `s_busy` had
+  already fallen and `S_HIT` had not yet been entered, so busy went low for exactly **one clk_ram
+  cycle**. clk_sys edges land on every other clk_ram edge, so about half the time PRS_READ sampled
+  that dip and latched `PRG_DI` in the very clock `dout_r` was loading — every read returned the
+  PREVIOUS access's word.
+
+Reads may be marked busy from the start (the gate array only waits). Writes may not, because
+PRS_WRITE drops the write strobes the moment it sees busy while sdram.sv still needs them — so the
+write path stays quiet until `s_busy` confirms the controller took it, and `saw_busy` carries it
+through a tail state with no gap. A pending-request latch makes a dropped edge impossible regardless.
+
+Simulated clean, 3245 reads / 1819 writes per configuration:
+`en=1 nohit=0` 2445 hits, 800 misses, 0 mismatches · `en=1 nohit=1` 0 hits, 3245 misses, 0 mismatches
+· `en=0` bypass, 0 mismatches. **Use this testbench before any further change to this module.**
+
+The three earlier defects, kept because they are all real and all the same family — an acknowledge
+given before the data or the request is safe:
 
 1. **`busy` rose when a request was noticed, not when the SDRAM accepted it.** PRS_WAIT reads "busy
    went high" as "accepted", and PRS_WRITE drops `PRG_RAM_WRL/WRH` immediately; sdram.sv captures a
