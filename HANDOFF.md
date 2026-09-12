@@ -184,6 +184,41 @@ the knob is either slightly more sub-CPU speed or a slightly longer frame - and 
 reset by `SECTOR_END` (CDC.vhd:521) where jgenesis describes it free-running, which remains the one
 structural difference at this test.
 
+### CDC FLAGS 41 measured: two candidate causes ELIMINATED with numbers
+
+Measured on r42 with the telemetry already compiled in - no rebuild needed.
+
+**1. Sub-CPU PRG-RAM latency is fully paid off.** Beat 2 (`tel_mcdbus` = {over-deadline, total})
+sampled through a verificator run:
+
+```
+reads 7,217,763 per 3 s (2.41 M/s)   over-deadline 0   = 0.00%
+```
+
+Zero, every sample. The historical figure was **1.38%** of reads costing a wait state. The cache,
+fast hits and posted writes between them removed it completely. **The sub-CPU no longer waits on
+memory at all**, so nothing further is to be won on that axis.
+
+**2. Gate-array register acknowledge is one clk_sys, both sides.** ASIC.vhd:613 (main, `$A120xx`)
+and ASIC.vhd:992 (sub, `$FF80xx`) both assert DTACK on the clock after the select, in a process that
+runs at the full 53.69 MHz with `EN` tied high. ~19 ns against a 68000 that can wait ~160 ns. Not it.
+
+**3. General sub-CPU throughput is bounded to ~0.5% by a test that PASSES.** VAR TESTS counts
+main-CPU polls across a sub-CPU-timed interval; its window is 23753-23980, about ±0.5%, and we sit
+inside it. If sub-CPU instruction throughput were the 2.5% slow that CDC FLAGS implies, VAR TESTS
+would read ~2.5% high and fail. It does not.
+
+**So the deficit is specific to what CDC FLAGS exercises and the passing tests do not: the CDC
+register ports themselves** ($FF8004/5 index, $FF8006/7 data), reached by the sub-CPU on behalf of
+the main CPU inside every RPC. That is the next thing to instrument - time the sub-CPU's /AS-to-
+/DTACK for `S68K_A(7 downto 1) = "0000010"/"0000011"` specifically, the way phase18 did for PRG-RAM,
+rather than assuming. Note `SUB_CPU_CDC_READ` (ASIC.vhd:1021/1233) is the host-data DMA handshake and
+waits on `DS = DS_IDLE`; whether a plain indexed register read touches that path is unverified and is
+the first thing to check.
+
+**Not fixed, and deliberately not guessed at.** Any change here without that measurement would be
+tuning a constant until a test passes, which is exactly what this project does not do.
+
 ### CDC FLAGS 41: NOT marginal any more, and the round trip is fully mapped
 
 "A different value each build" was a symptom of something already fixed, not of a live timing
