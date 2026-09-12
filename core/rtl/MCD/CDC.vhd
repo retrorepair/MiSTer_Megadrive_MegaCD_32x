@@ -518,7 +518,15 @@ begin
 		elsif rising_edge(CLK) then
 			DEC_FRAME <= '0';
 			DEC_MID <= '0';
-			if CTRL0(DECEN) = '0' or SECTOR_END = '1' then
+			-- FREE-RUNNING (tools/phase58_free_dec_frame.py). SECTOR_END used to reset this counter
+			-- as well, on the idea that the drive's sector stream and the frame should be kept in
+			-- step. It does the opposite: the reset does not pulse DEC_FRAME, so a sector arriving
+			-- after FRAME_MID cancelled that frame's DECI assertion and restarted the count.
+			-- Measured live during mcd-verificator, DEC_MID fired MORE OFTEN than DEC_FRAME
+			-- (+25 against +22, +29 against +27) - assertions were going missing.
+			-- The hardware's decoder interrupt free-runs at 75 Hz whether or not sectors are
+			-- arriving; DECEN off is the only thing that stops it.
+			if CTRL0(DECEN) = '0' then
 				FRAME_CNT <= (others => '0');
 			elsif FRAME_CNT = FRAME_END then
 				FRAME_CNT <= (others => '0');
