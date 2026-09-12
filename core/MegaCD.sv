@@ -1293,8 +1293,35 @@ always @(posedge clk_sys) begin
 	if(old_busy & ~tmpram_busy) ioctl_wait <= 0;
 end
 
-assign MCD_PRG_BUSY = sdr_busy;
-assign MCD_PRG_DI   = sdr_do;
+// Mega CD PRG-RAM read cache (core/rtl/prg_cache.sv, tools/phase54_prg_cache.py). The sub-CPU
+// re-reads about fifty words; every hit is one SDRAM slot the MD's cartridge fetches stop losing,
+// which is the 2.6% the mcd-verificator timing tests are short of. Writes still go straight to the
+// SDRAM, and every PRG-RAM writer reaches it through this one port, so the cache cannot go stale.
+wire [24:1] prgc_a;
+wire [15:0] prgc_din;
+wire        prgc_rd, prgc_wrl, prgc_wrh;
+
+prg_cache #(.IDX(9)) prg_cache
+(
+	.clk(clk_ram),
+	.reset(reset),
+
+	.a({(MCD_BANK23 ? 6'b100000 : 6'b011111),MCD_PRG_ADDR}),
+	.din(MCD_PRG_DO),
+	.dout(MCD_PRG_DI),
+	.rd(~MCD_PRG_OE_N),
+	.wrl(~MCD_PRG_WRL_N),
+	.wrh(~MCD_PRG_WRH_N),
+	.busy(MCD_PRG_BUSY),
+
+	.s_a(prgc_a),
+	.s_din(prgc_din),
+	.s_dout(sdr_do),
+	.s_rd(prgc_rd),
+	.s_wrl(prgc_wrl),
+	.s_wrh(prgc_wrh),
+	.s_busy(sdr_busy)
+);
 
 
 //MCD PRGRAM, GEN ROM/RAM/CART RAM
@@ -1324,13 +1351,13 @@ sdram sdram
 	.wrh1(1'b0),
 	.busy1(GEN_MEM_BUSY),
 
-	//MCD PRG-RAM: banks 2,3
-	.addr2({(MCD_BANK23 ? 6'b100000 : 6'b011111),MCD_PRG_ADDR}), // 1000000-107FFFF / 0F80000-0FFFFFF
-	.din2(MCD_PRG_DO),
+	//MCD PRG-RAM: banks 2,3 - behind the read cache above (1000000-107FFFF / 0F80000-0FFFFFF)
+	.addr2(prgc_a),
+	.din2(prgc_din),
 	.dout2(sdr_do),
-	.rd2(~MCD_PRG_OE_N),
-	.wrl2(~MCD_PRG_WRL_N),
-	.wrh2(~MCD_PRG_WRH_N),
+	.rd2(prgc_rd),
+	.wrl2(prgc_wrl),
+	.wrh2(prgc_wrh),
 	.busy2(sdr_busy),
 
 	//MCD PCM wave RAM (sub CPU, gate array DMA, sample fetch) - see rtl/pcm_mem.sv

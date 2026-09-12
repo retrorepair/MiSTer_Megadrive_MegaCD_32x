@@ -14,12 +14,14 @@ file in `releases/`, and `core/output_files/MegaCD.rbf` are all md5 `c819f5cdb4a
 
 ## ►► READ THIS BEFORE TRUSTING ANY BOOT-RATE NUMBER IN THIS FILE
 
-Every screenshot-based boot harness written before today built the MGL path as
-`_Console/<tag>_fusion.mgl`. The real name is `_Console/MegaCD_<tag>_fusion.mgl`. **MiSTer silently
-ignores a `load_core` naming a file that does not exist**, so the core kept running and the harness
-screenshotted the *previous* boot. Twelve "clean boots" were one boot photographed twelve times, and
-`scratch/sweep30.py`, `scratch/menutest.py` and `scratch/fbcheck2.py` all have the same shape — any
-result from them where every title looks identical is suspect.
+These harnesses take the core name as an argument and paste it into
+`_Console/<prefix>_<title>.mgl`, so the prefix must be the FULL core name (`MegaCD_PQ`, not `PQ`).
+Pass the short form and you get `_Console/PQ_fusion.mgl`, which does not exist — and **MiSTer
+silently ignores a `load_core` naming a file that does not exist**. The core keeps running and the
+harness screenshots the *previous* boot. That is how twelve "clean boots" turned out to be one boot
+photographed twelve times, and it is the on-screen "no rbf found". `scratch/sweep30.py`,
+`scratch/menutest.py` and `scratch/fbcheck2.py` share the shape; none of them checks. Results where
+every sample looks identical are the symptom.
 
 Use `tools/mister/boottest.py`: it exits if the MGL is missing, waits for MiSTer's pid to change before
 it starts timing, and retries a load that did not take. Also note a real Fusion boot takes **~50 s**
@@ -55,15 +57,74 @@ frame-buffer word @ SH-2 0x24000200 reads 0xFFFFFFFF (never written)
 Discriminator is perfect over 10 boots: failing -> FB0 `FFFFFFFF`, working -> `00000000`.
 Caller found by hardware probe at `0202051A`/`02020546`; literals resolve to `"T_START"`
 (0x0202C40C), `"T_END"` (0x0202C404), `W_GetNumForName` (0x02018EF4), `numtextures` (0x06006BDE),
-`memset` (0x0201FD18). **Next step: find why that word is unwritten — NOT another fix attempt.**
+`memset` (0x0201FD18).
+
+### UPDATE 2026-09-12: "never written" is WRONG. Something writes 0xFF, and it has a shape.
+
+Rate on r38 with every reload verified: **3 of 12 boots hang** (`tools/mister/boottest.py`, 50 s
+window, frame buffers poisoned with 0xFF at core start). A live DDR3 trace of a failing boot
+(`tools/mister/boottrace.py`, logs the 32X comm registers beside the frame buffer) shows the opposite of
+what was assumed:
+
+```
+30.59  FB0@0x200 = 44532E57   COMM0=2600   Mars_OpenCDFileByName: the SH-2 put a name in the buffer
+30.88  FB0@0x200 = 00000000   COMM0=2800   Mars_ReadCDFile: buffer cleared, CD read asked for
+31.24  FB0@0x200 = 58000000   COMM0->0000  data arrived, read complete
+31.63                         COMM0=2400 -> 2A56   Mars_MCDLoadSfxFileOfs (load 0x56 sfx)
+31.69                         COMM0->0000  sfx load done
+31.70  FB0@0x200 = 00000000   buffer cleared again
+31.72  FB0@0x200 = FFFFFFFF   <-- 42 KB of the buffer becomes 0xFF, with NO 0x2800 in between
+31.89  87% of a 16 KB sample is 0xFF; work RAM never repopulates; black screen
+```
+
+So the word is written, cleared, and then actively overwritten with ones. And the overwrite is not a
+wholesale fill — `tools/mister/fbdump.py` maps it exactly:
+
+```
+0x00000-0x001FF  32X line table          (correct, this is where it belongs)
+0x00200-0x00FFF  0xFF                    3584 bytes
+0x01000-0x011FF  a COPY of the line table  512 bytes
+0x01200-0x01FFF  0xFF                    3584 bytes
+0x02000-0x021FF  a COPY of the line table  512 bytes
+   ... repeating on a 4096-byte period, 12 times, to 0x0BE4F
+0x0BE58-0x1FFFF  0x00                    (the buffer had been zeroed this far first)
+```
+
+**On a working boot the line table exists only at 0x0000 and there is no 0xFF anywhere** (verified
+boot, `wrk_nz=51%`, FB0 `FF=0%`, 0x1000 and 0x2000 read as zero). The 4 KB-spaced copies are part of
+the fault, not normal structure.
+
+Read as one write stream, the source is a 4096-byte object of [3584 bytes 0xFF][512 bytes line
+table] repeated 12 times — or the destination address generator is aliasing bit 11 of the word
+address. **Next step: a probe that records frame-buffer write address + data + originator (MD or
+SH-2) around that instant.** `tools/phase53_fm_probe.py` is written and unused and is the natural
+place to add it: it already counts accesses refused because the wrong side owns the buffer (`FM`),
+which is the other candidate for "the SH-2's clear did not take".
 
 **2. mcd-verificator: 4 failures, ONE cause, and it is NOT fpgagen.** VAR TESTS 02, IRQ TEST 09,
 REG 8030 07, CDC FLAGS 40. The MD's cartridge instruction fetches stall on an SDRAM controller
 shared with Mega CD PRG-RAM: sub-CPU at 2.13M reads/s x 65 ns = 13.7% controller occupancy, ~1.7%
 of a 521 ns 68000 bus cycle, plus ~0.9% refresh = ~2.6%, against the 2.59% speed-up CDC FLAGS needs.
-**Recommended fix: a small cache on the PRG-RAM port, keeping it on fast SDRAM** (see DEAD ENDS for
-why NOT to relocate it). Working set is ~50 words, so temporal locality alone suffices; `sdram.sv`
-has no burst support so a line fill would cost the same slots. The real work is invalidation from
+**BUILT 2026-09-12: `core/rtl/prg_cache.sv` + `tools/phase54_prg_cache.py`.** 512-entry direct-mapped,
+one 16-bit word per entry, in MLABs (block RAM is the binding resource at 539/553; ALMs are at 79%).
+Write-through. A hit is held busy for as long as an uncontended miss, so the Mega CD sees today's
+latency and only the SDRAM slot disappears — the point is to stop the sub-CPU stealing cycles from
+the MD's cartridge fetches, not to speed the sub-CPU up.
+
+**The stated coherency risk turned out not to exist.** All three PRG-RAM writers — sub-CPU, the MD's
+gate-array window at $420000, CDC DMA — are already arbitrated onto this ONE port inside ASIC.vhd
+(`PRG_RAM_ADDR` is driven from `S68K_*`, `EXT_*` and `DMA_*` in one process, ASIC.vhd:1471/1555/1574),
+and no other SDRAM port addresses the region (port 0 cartridge 0000000-0EFFFFF, port 1 BIOS
+0F00000-0F1FFFF, port 3 PCM 1080000-108FFFF, port 4 load/save). So a cache at the port sees every
+write and invalidation is automatic.
+
+**One trap worth keeping:** ASIC.vhd's PRS_WAIT drops `PRG_RAM_WRL/WRH` as soon as it sees busy go
+HIGH (PRS_WRITE) — it does *not* wait for busy to fall. A cache that merges a write from the live
+pins at completion therefore stores the OLD word back and marks it valid. `prg_cache.sv` latches the
+write data and byte enables with the request. This was caught by reading ASIC.vhd, not by testing.
+
+Original notes: working set is ~50 words, so temporal locality alone suffices; `sdram.sv`
+has no burst support so a line fill would cost the same slots. The invalidation concern was
 all three writers: sub-CPU, MD gate-array window ($420000 in mode 1), CDC DMA.
 
 **3. r31 (`phase44_cart_strobe_leak`) is built and tested but NOT promoted.** Closes a genuine race
