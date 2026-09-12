@@ -2148,3 +2148,34 @@ shows the pattern, including a line cache). That removes 13.7% of controller occ
 cartridge path and should move VAR TESTS, IRQ TEST, REG 8030 and CDC FLAGS together. It is a
 substantial change with real regression risk, so it wants its own session and a full title sweep,
 not a late-night patch.
+
+### Do NOT move Mega CD PRG-RAM to DDR3 (user, correctly)
+
+The SDRAM module is on the board specifically for low, DETERMINISTIC latency; DDR3 sits behind the
+HPS f2sdram bridge and is shared with Linux and Main_MiSTer, which is actively reading CD data
+during exactly the workloads that matter. Putting a CPU with a /DTACK deadline behind that swaps a
+known 65 ns access for one contended by software the core does not control. The 32X work RAM lives
+there because it has a 16-byte line cache to hide the latency and the SH-2s tolerate waits - that is
+a workaround, not a precedent.
+
+### Better: keep PRG-RAM on SDRAM and give its port a small cache
+
+The sub-CPU's working set is TINY. Measured with scratch/subhist.py during the Fusion work:
+
+    sub-CPU address bus, 8000 samples, 62 distinct
+    sub-CPU address bus, 4000 samples, 41 distinct
+
+~50 words. It is not streaming 512 KB, it is re-fetching tight loops, which is also exactly what the
+verificator's poll loop does. A small instruction cache on the PRG-RAM port would hit near 100% in
+those loops and collapse the 13.7% SDRAM occupancy that is stalling the MD's cartridge fetches -
+the same result as relocating it, without touching DDR3.
+
+Note a line cache alone is NOT enough if it only converts 8 single reads into an 8-slot line fill:
+sdram.sv does one word per 7-cycle access with no burst support (sdram.sv:107-112), so a sequential
+line fill costs the same slots. The gain here comes from TEMPORAL locality (loops re-hitting the
+same words), not spatial, so even a very small fully-associative cache would do.
+
+RISK, and it is the real work: PRG-RAM is written from three directions - the sub-CPU, the MD
+through the gate-array window ($420000 in mode 1), and CDC DMA (ASIC.vhd PR_DMA_RUN). All three
+must invalidate. Getting that wrong corrupts sub-CPU code in a way that looks exactly like the
+bugs chased in this session.

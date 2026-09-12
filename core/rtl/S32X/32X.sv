@@ -49,6 +49,7 @@ module S32X
 	input             SDR_WAIT,
 
 	// frame buffers in DDR3 (rtl/s32x_ddr.sv): draw port, line prefetch, line buffer
+	output     [31:0] DBG_FB,			// tools/phase49_fb_select_probe.py
 	output            FBD_FB,
 	output     [15:0] FBD_A,
 	output     [15:0] FBD_DO,
@@ -397,6 +398,7 @@ module S32X
 		.VINT(VDP_VINT),
 		.HINT(VDP_HINT),
 
+		.DBG_FB(DBG_FB),
 		.FBD_FB(FBD_FB),
 		.FBD_A(FBD_A),
 		.FBD_DO(FBD_DO),
