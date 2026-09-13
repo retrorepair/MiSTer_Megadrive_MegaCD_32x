@@ -43,12 +43,14 @@ def pid():
 
 fr = os.open("/dev/mem", os.O_RDONLY | os.O_SYNC)
 FB0 = mmap.mmap(fr, 0x20000, mmap.MAP_SHARED, mmap.PROT_READ, offset=0x30100000)
+TEL = mmap.mmap(fr, 0x1000, mmap.MAP_SHARED, mmap.PROT_READ, offset=0x30200000)
 
 for run in range(loads):
     was = pid()
     now = was
     for _ in range(6):
-        os.system("echo load_core %s > /dev/MiSTer_cmd" % mgl)
+        # a busy MiSTer stops reading its command FIFO and a bare echo then blocks for good
+        os.system("timeout 5 sh -c 'echo load_core %s > /dev/MiSTer_cmd'" % mgl)
         t = time.time()
         while time.time() - t < 10:
             time.sleep(0.2)
@@ -61,10 +63,22 @@ for run in range(loads):
         print("run %d: NO RELOAD" % run, flush=True)
         continue
     time.sleep(warm)
+    # the intro opens on still frames that are identical on every load and say nothing about
+    # placement, so hold off until the frame buffer is actually changing (live video)
+    t = time.time()
+    last = bytes(FB0[0:0x20000])
+    while time.time() - t < 60:
+        time.sleep(0.5)
+        cur = bytes(FB0[0:0x20000])
+        if cur != last:
+            break
+        last = cur
+    else:
+        print("run %d: frame buffer never went live" % run, flush=True)
 
     for k in range(shots):
         before = set(os.listdir(SHOTDIR))
-        os.system("echo screenshot > /dev/MiSTer_cmd")
+        os.system("timeout 5 sh -c 'echo screenshot > /dev/MiSTer_cmd'")
         d0 = bytes(FB0[0:0x20000])
         open("%s/r%02d_%d_fb0.bin" % (OUT, run, k), "wb").write(d0)
         shot = ""
@@ -76,9 +90,23 @@ for run in range(loads):
                 break
         if shot:
             src = "%s/%s" % (SHOTDIR, shot)
+            # MiSTer creates the file before it has finished writing it: copy it only once it has
+            # stopped growing, or the PNG comes back truncated
+            size = -1
+            for _ in range(25):
+                time.sleep(0.2)
+                sz = os.path.getsize(src)
+                if sz == size and sz > 0:
+                    break
+                size = sz
             open("%s/r%02d_%d_screen.png" % (OUT, run, k), "wb").write(open(src, "rb").read())
             os.unlink(src)                      # the screenshot dir stays as we found it
-        print("run %d shot %d: fb0 nz=%d %s" % (run, k, 0x20000 - d0.count(0), shot or "NO SHOT"),
+        # the 32X horizontal lock (telemetry beat 8, see tools/mister/hlock.py)
+        raw = TEL[64:72]
+        lo = raw[0] | (raw[1] << 8)
+        hcnt = (raw[2] | (raw[3] << 8)) & 0x1FF
+        print("run %d shot %d: fb0 nz=%d H_CNT@HSYNC=0x%03X taken=%d refused=%d %s"
+              % (run, k, 0x20000 - d0.count(0), hcnt, (lo >> 8) & 0xFF, lo & 0xFF, shot or "NO SHOT"),
               flush=True)
         time.sleep(1.5)
 

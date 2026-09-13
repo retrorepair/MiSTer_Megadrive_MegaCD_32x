@@ -2,15 +2,22 @@
 
 ---
 
-# ► CURRENT STATE (session closed 2026-09-12, second session)
+# ► CURRENT STATE (2026-09-13)
 
-**Released:** r38 is published as a downloadable bitstream at
-<https://github.com/retrorepair/MiSTer_Megadrive_MegaCD_32x/releases/tag/r38> (the `.rbf` is a release
-asset; `*.rbf` is gitignored so it is not in the tree). `main` is fast-forwarded to `phase18-dtack`,
-tagged `r38`, and pushed. **Verified:** the core running on the MiSTer as `MegaCD_PQ`/`MegaCD_PP`, the
-file in `releases/`, and `core/output_files/MegaCD.rbf` are all md5 `c819f5cdb4a0cb6bcea946486ddd2307`
-— one and the same build. Timing clean (+0.383, all clocks positive).
-`/media/fat/config/MegaCD.CFG` status = `0000001020006680` (bit 24 `prg_first` = 0, as it should be).
+**Released: r43** (32X horizontal lock) at
+<https://github.com/retrorepair/MiSTer_Megadrive_MegaCD_32x/releases/tag/r43> (the `.rbf` is a release
+asset; `*.rbf` is gitignored so it is not in the tree). `main` = `phase18-dtack`, tagged `r43`, pushed.
+md5 `1ad31fe0881681447f6429b33d2f9822` for `releases/MegaCD_MD_MCD_32X_r43_hlock.rbf`,
+`core/output_files/MegaCD.rbf`, `_Test/MegaCD_MD_MCD_32X.rbf` and `_Console/MegaCD.rbf` on the MiSTer.
+The only RTL change after the build commit (6791257) is two comment lines in VDP.sv, so the tree matches
+the bitstream. The previous `_Console/MegaCD.rbf` (md5 `d5c20828…`, not any release) is backed up at
+`/media/fat/core_backups/MegaCD_d5c20828.rbf`.
+
+**GOTCHA: an MGL `<rbf>_Console/MegaCD</rbf>` loads `_Console/MegaCD_20260603.rbf`, NOT `MegaCD.rbf`**
+— MiSTer prefers the dated name (verified from the `ps` command line). Anything launched through the
+menu/MGL by that name runs `MegaCD_20260603.rbf` (md5 `faa950ae…`), whatever `MegaCD.rbf` holds.
+
+(Previous state, r38: `/media/fat/config/MegaCD.CFG` status = `0000001020006680`, bit 24 `prg_first` = 0.)
 
 ## ►► READ THIS BEFORE TRUSTING ANY BOOT-RATE NUMBER IN THIS FILE
 
@@ -46,6 +53,22 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 ## OPEN
 
 **0. Night Trap's horizontal offset — FIXED and PROVEN in r43. A separate, pre-existing crash remains (below).**
+
+**2026-09-13: confirmed over 8 fresh loads, not just one.** `tools/mister/ntsweep.py` on r43
+(`_Test/MegaCD_MD_MCD_32X.rbf`, md5 `1ad31fe0…`), Night Trap USA CD32X, captured once the frame
+buffer was live: telemetry beat 8 read `H_CNT@HSYNC = 0x1CE`, 0 edges refused, on **8 of 8** loads;
+`tools/fbshift.py` on the 7 intact screenshots gave 0, 0, -4, 0, -1, -1, +4 px (correlation noise on
+moving video, 3-9 lines voting - the fault was -68..-111 / +66 px). The randomness was only ever
+the phase the lock latched at start-up, and r43 removes it. NOTE `_Console/MegaCD.rbf` on the MiSTer
+is md5 `d5c20828…`, which matches NO build in `releases/` - launching Night Trap from that core
+will still show the old random placement.
+
+ntsweep.py fixes made while doing this (all three bit silently): the disc moved to
+`rr-sega-mega-cd/bin/usa/Night Trap (USA) (Disc 1) (Sega CD 32X) (RE-1).chd` (the old `32xcd/*.cue`
+path is gone); a bare `echo > /dev/MiSTer_cmd` can block for ever while MiSTer is busy (now under
+`timeout 5`); the intro sits on one still frame identical on every load around 27 s, so it now waits
+for the frame buffer to change; MiSTer's screenshot PNG is created before it is written, so it
+waits for the size to settle (still lost 1 of 8 - check with PIL before trusting a capture).
 
 Captured (`scratch/shots/b8.png`): the intro globe fills the LEFT ~55% and is CLIPPED at the left
 edge, black to the right. User reports it intermittently stalls and that a sliver of the left side
