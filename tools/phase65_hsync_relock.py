@@ -18,9 +18,9 @@ tools/fbrender.py + tools/fbshift.py say what happened to the picture between me
 
 THE MECHANISM
 VDP.sv resynchronised H_CNT to the MD's HSYNC only while H_CNT >= 0x160. That is a test on the
-counter's PHASE. The 32X display window opens 73 dots after the resync point (0x1CE -> 0x17 through
+counter's PHASE. The 32X display window opens 72 dots after the resync point (0x1CE -> 0x17 through
 the 9-bit wrap), so if H_CNT reads X instead of 0x1CE when HSYNC falls, the layer is displaced by
-X - 0x1CE dots. Running the three measurements backwards gives X = 0x12, 0x18 and 0x3D - every one
+X - 0x1CE dots. Running the three measurements backwards gives X = 0x12, 0x19 and 0x3D - every one
 of them just outside the accept window. Once the phase is outside that window the resync can never
 fire again, and because the free-run period (420) equals the MD's H40 line the wrong phase then
 persists for ever. It is a permanent lock failure, not a drift, which is why the offset is rock
@@ -105,9 +105,9 @@ edit("rtl/S32X/VDP.sv", [
      "\t\t\t\tend\n",
      "\t\t\t\t// HORIZONTAL LOCK (tools/phase65_hsync_relock.py). This used to accept the MD's HSYNC\n"
      "\t\t\t\t// only while H_CNT >= 0x160, a test on the counter's PHASE. The display window opens\n"
-     "\t\t\t\t// 73 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so an H_CNT of\n"
+     "\t\t\t\t// 72 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so an H_CNT of\n"
      "\t\t\t\t// X at HSYNC displaces the whole layer by X - 0x1CE dots. Night Trap measured 68, 75 and\n"
-     "\t\t\t\t// 111 px left over three core loads - X = 0x12, 0x18, 0x3D, every one just outside the\n"
+     "\t\t\t\t// 111 px left over three core loads - X = 0x12, 0x19, 0x3D, every one just outside the\n"
      "\t\t\t\t// window - with a correct frame buffer, the same displacement on every line, and the\n"
      "\t\t\t\t// fault surviving the game crashing. Once the phase is outside the window the resync can\n"
      "\t\t\t\t// never fire again, and since the free-run period below (420) equals the MD's H40 line,\n"

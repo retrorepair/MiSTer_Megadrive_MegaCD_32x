@@ -26,11 +26,15 @@ TEL = mmap.mmap(fr, 0x1000, mmap.MAP_SHARED, mmap.PROT_READ, offset=0x30200000)
 
 print("  H_CNT@HSYNC  taken  refused   implied displacement")
 for i in range(n):
-    v = struct.unpack(">Q", TEL[64:72])[0] & 0xFFFFFFFF
-    hcnt = (v >> 16) & 0x1FF
-    acc = (v >> 8) & 0xFF
-    rej = v & 0xFF
-    # the display window opens 73 dots after the resync point, so H_CNT - 0x1CE is the displacement
+    # DDR3 packs four 16-bit words per beat with word 0 at bits 63:48, so the HPS sees the words
+    # reversed: bytes 0..3 are DBG_SYNC[15:0] then DBG_SYNC[31:16], each little-endian.
+    raw = TEL[64:72]
+    lo = raw[0] | (raw[1] << 8)
+    hi = raw[2] | (raw[3] << 8)
+    hcnt = hi & 0x1FF
+    acc = (lo >> 8) & 0xFF
+    rej = lo & 0xFF
+    # the display window opens 72 dots after the resync point, so H_CNT - 0x1CE is the displacement
     disp = hcnt - 0x1CE
     if disp < -256:
         disp += 512

@@ -45,7 +45,7 @@ faults. Fusion reaches its title screen and menu, but see OPEN #1.
 
 ## OPEN
 
-**0. Night Trap's horizontal offset — ROOT CAUSE FOUND: the 32X loses horizontal lock to the MD. Fix built, hardware verification pending.**
+**0. Night Trap's horizontal offset — FIXED and PROVEN in r43. A separate, pre-existing crash remains (below).**
 
 Captured (`scratch/shots/b8.png`): the intro globe fills the LEFT ~55% and is CLIPPED at the left
 edge, black to the right. User reports it intermittently stalls and that a sliver of the left side
@@ -94,9 +94,9 @@ horizontal counter to the MD's HSYNC only while `H_CNT >= 9'h160` - a test on th
 
     if (!HSYNC_N_SYNC && HSYNC_N_OLD && H_CNT >= 9'h160) H_CNT <= 9'h1CE;
 
-The 32X display window opens 73 dots after the resync point (`0x1CE -> 0x17` through the 9-bit
+The 32X display window opens 72 dots after the resync point (`0x1CE -> 0x17` through the 9-bit
 wrap), so an `H_CNT` of X at HSYNC displaces the whole layer by `X - 0x1CE` dots. Running the three
-measured displacements backwards gives X = 0x12, 0x18 and 0x3D - every one just outside the accept
+measured displacements backwards gives X = 0x12, 0x19 and 0x3D - every one just outside the accept
 window. Once the phase is outside it the resync can never fire again, and because the free-run
 period (420) equals the MD's H40 line the wrong phase persists for ever. A permanent lock failure,
 not a drift - which is exactly why the offset is rock steady, why it differs between core loads, and
@@ -113,6 +113,27 @@ accept identically, which is why cart 32X is unaffected - but phase can no longe
 Default ON; OSD bit 49 restores the upstream guard so one bitstream A/Bs it. Telemetry beat 8 carries
 `H_CNT` at the last HSYNC, plus saturating counts of edges taken and refused
 (`tools/mister/hlock.py`).
+
+**PROVEN on hardware (r43, `MegaCD_MD_MCD_32X_r43_hlock.rbf`, md5 `1ad31fe0881681447f6429b33d2f9822`).**
+One bitstream, one game, only OSD bit 49 differing:
+
+| guard | `H_CNT` at HSYNC | edges taken | edges refused | implied displacement |
+|---|---|---|---|---|
+| new, by time (default) | `0x1CE` | 255 (saturated) | **0** | **0 px, locked** |
+| upstream, by phase (bit 49) | `0x010` | 2 | 255 (saturated) | **+66 px, out of lock** |
+
+`0x010` is just outside the `>= 0x160` accept window exactly as predicted, and the implied +66 px
+matches the +65/+65/+67 px measured optically by `tools/fbshift.py` on three independent loads. Two
+independent methods, 1-2 px apart. The picture is centred with the fix on.
+
+Read it with `tools/mister/hlock.py`, and mind the DDR3 word order: beat 8's four 16-bit words come
+back reversed, so `DBG_SYNC[15:0]` is in bytes 0..1 and `DBG_SYNC[31:16]` in bytes 2..3.
+
+**NOT fixed, and NOT caused by this change: Night Trap freezes ~9 s into the intro.** The frame
+buffer stops changing and never resumes. A/B on the SAME bitstream freezes at the identical instant
+with the fix ON (`H_CNT` 0x1CE) and OFF (`H_CNT` 0x010) - same `fb0 nz=35263`, same t=9 s - so the
+guard change is not implicated. It is the pre-existing freeze already seen on r42, and it is why 9 of
+12 loads in the reload sweep never reached live video. That is the next thing to chase.
 
 **Why CD32X exposes it and cart-only 32X does not** (the user's hypothesis, and it holds up): during
 disc playback the same DDR3 port is servicing heavy frame-buffer WRITES as video is blitted in, which

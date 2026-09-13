@@ -310,9 +310,9 @@ module S32X_VDP
 				HSYNC_N_OLD <= HSYNC_N_SYNC;
 				// HORIZONTAL LOCK (tools/phase65_hsync_relock.py). This used to accept the MD's HSYNC
 				// only while H_CNT >= 0x160, a test on the counter's PHASE. The display window opens
-				// 73 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so an H_CNT of
+				// 72 dots after the resync point (0x1CE -> 0x17 through the 9-bit wrap), so an H_CNT of
 				// X at HSYNC displaces the whole layer by X - 0x1CE dots. Night Trap measured 68, 75 and
-				// 111 px left over three core loads - X = 0x12, 0x18, 0x3D, every one just outside the
+				// 111 px left over three core loads - X = 0x12, 0x19, 0x3D, every one just outside the
 				// window - with a correct frame buffer, the same displacement on every line, and the
 				// fault surviving the game crashing. Once the phase is outside the window the resync can
 				// never fire again, and since the free-run period below (420) equals the MD's H40 line,
