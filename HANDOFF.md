@@ -129,11 +129,27 @@ independent methods, 1-2 px apart. The picture is centred with the fix on.
 Read it with `tools/mister/hlock.py`, and mind the DDR3 word order: beat 8's four 16-bit words come
 back reversed, so `DBG_SYNC[15:0]` is in bytes 0..1 and `DBG_SYNC[31:16]` in bytes 2..3.
 
-**NOT fixed, and NOT caused by this change: Night Trap freezes ~9 s into the intro.** The frame
-buffer stops changing and never resumes. A/B on the SAME bitstream freezes at the identical instant
-with the fix ON (`H_CNT` 0x1CE) and OFF (`H_CNT` 0x010) - same `fb0 nz=35263`, same t=9 s - so the
-guard change is not implicated. It is the pre-existing freeze already seen on r42, and it is why 9 of
-12 loads in the reload sweep never reached live video. That is the next thing to chase.
+**NOT fixed, and MEASURED not to be caused by this change: Night Trap freezes in its intro.** The
+frame buffer stops changing and never resumes. Established with `tools/mister/crashrate.py`, which
+loads a game repeatedly on two cores under identical conditions and records how long each run keeps
+live video:
+
+| core | runs | froze | rate |
+|---|---|---|---|
+| r42 (no lock change) | 12 | 1 | 8% |
+| r43 (lock change)    | 12 | 2 | 17% |
+
+Statistically indistinguishable, and r42 froze at exactly the same instant r43's deaths happen -
+6.0 s of live video - so it is one deterministic spot in the intro that trips intermittently on both.
+The lock change is not implicated.
+
+Two earlier conclusions about this crash were asserted without adequate evidence and both are
+superseded by the table above: an A/B on OSD bit 49 CANNOT clear r43, because it only isolates the
+guard logic and not the rest of the build; and a single run of each core CANNOT convict it. Use
+crashrate.py and a dozen runs a side for anything of this kind - the base rate is ~1 in 8, so small
+samples say nothing.
+
+Chasing the freeze is the next job, on both cores.
 
 **Why CD32X exposes it and cart-only 32X does not** (the user's hypothesis, and it holds up): during
 disc playback the same DDR3 port is servicing heavy frame-buffer WRITES as video is blitted in, which
